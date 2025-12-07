@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+### Minor Changes
+
+- f02b12a: Added vercel blob support to upload providers
+
 ## 1.1.1
 
 ### Patch Changes
