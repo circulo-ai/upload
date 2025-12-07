@@ -217,7 +217,7 @@ export function getMimeTypeFromExtension(extension: string): string {
  */
 export function validateFileType(
   fileName: string,
-  mimeType: string
+  mimeType: string,
 ): FileValidationError | null {
   const extension = getFileExtension(fileName) as SupportedMediaExtension;
 
@@ -312,13 +312,13 @@ export function validateFileType(
  */
 export function validateFileSize(
   fileSize: number,
-  maxSize: typeof MAX_FILE_SIZE = 100 * 1024 * 1024
+  maxSize: typeof MAX_FILE_SIZE = 100 * 1024 * 1024,
 ): FileValidationError | null {
   if (fileSize > maxSize) {
     return {
       code: "FILE_TOO_LARGE",
       message: `File size ${formatFileSize(
-        fileSize
+        fileSize,
       )} exceeds maximum ${formatFileSize(maxSize)}`,
       supportedTypes: [],
     };

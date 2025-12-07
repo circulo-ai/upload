@@ -113,7 +113,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
     const { file, fileName, contentType, preserveKey, customKey } = options;
 
     const key = this.getFullKey(
-      customKey || this.generateKey(fileName, preserveKey)
+      customKey || this.generateKey(fileName, preserveKey),
     );
 
     const filePath = this.getFilePath(key);

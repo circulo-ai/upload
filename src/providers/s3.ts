@@ -115,7 +115,7 @@ export class S3StorageProvider extends BaseStorageProvider {
       options;
 
     const key = this.getFullKey(
-      customKey || this.generateKey(fileName, preserveKey)
+      customKey || this.generateKey(fileName, preserveKey),
     );
 
     const uploadMetadata: Record<string, string> = {
@@ -131,7 +131,7 @@ export class S3StorageProvider extends BaseStorageProvider {
         Body: file,
         ContentType: contentType,
         Metadata: this.sanitizeMetadata(uploadMetadata),
-      })
+      }),
     );
 
     return {
@@ -176,7 +176,7 @@ export class S3StorageProvider extends BaseStorageProvider {
       new DeleteObjectCommand({
         Bucket: this.config.bucket,
         Key: fullKey,
-      })
+      }),
     );
   }
 
@@ -185,7 +185,7 @@ export class S3StorageProvider extends BaseStorageProvider {
   }
 
   async generatePresignedUploadUrl(
-    options: PresignedUploadUrlOptions
+    options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse> {
     const {
       fileName,
@@ -222,7 +222,7 @@ export class S3StorageProvider extends BaseStorageProvider {
   }
 
   async generatePresignedDownloadUrl(
-    options: PresignedDownloadUrlOptions
+    options: PresignedDownloadUrlOptions,
   ): Promise<string> {
     const { key, expirationSeconds = 3600 } = options;
     const fullKey = this.getFullKey(key);
@@ -240,7 +240,7 @@ export class S3StorageProvider extends BaseStorageProvider {
   }
 
   async initiateMultipartUpload(
-    options: MultipartInitOptions
+    options: MultipartInitOptions,
   ): Promise<MultipartInitResponse> {
     const { fileName, contentType, metadata } = options;
 
@@ -251,7 +251,7 @@ export class S3StorageProvider extends BaseStorageProvider {
     const key = this.getFullKey(
       `${Date.now()}-${Math.random()
         .toString(36)
-        .substring(2, 9)}-${safeFileName}`
+        .substring(2, 9)}-${safeFileName}`,
     );
 
     const uploadMetadata: Record<string, string> = {
@@ -280,7 +280,7 @@ export class S3StorageProvider extends BaseStorageProvider {
   }
 
   async getMultipartPartUrls(
-    options: MultipartPartUrlsOptions
+    options: MultipartPartUrlsOptions,
   ): Promise<MultipartPartUrl[]> {
     const { uploadId, key, partNumbers } = options;
     const fullKey = this.getFullKey(key);
@@ -299,14 +299,14 @@ export class S3StorageProvider extends BaseStorageProvider {
         });
 
         return { partNumber, url };
-      })
+      }),
     );
 
     return urls;
   }
 
   async completeMultipartUpload(
-    options: MultipartCompleteOptions
+    options: MultipartCompleteOptions,
   ): Promise<MultipartCompleteResponse> {
     const { uploadId, key, parts } = options;
     const fullKey = this.getFullKey(key);
@@ -315,7 +315,7 @@ export class S3StorageProvider extends BaseStorageProvider {
     const s3Parts: S3UploadPart[] = parts.map((part) => {
       if (!isS3UploadPart(part)) {
         throw new Error(
-          "Invalid part format for S3. Expected { PartNumber: number, ETag: string }"
+          "Invalid part format for S3. Expected { PartNumber: number, ETag: string }",
         );
       }
       return part;
@@ -356,7 +356,7 @@ export class S3StorageProvider extends BaseStorageProvider {
         Bucket: this.config.bucket,
         Key: fullKey,
         UploadId: uploadId,
-      })
+      }),
     );
   }
 }

@@ -13,7 +13,7 @@ import type {
  * Notes:
  * - If you deploy on the same Vercel project as the Blob store, you usually
  *   *don’t* need to pass a token explicitly – the SDK will use
- *   process.env.BLOB_READ_WRITE_TOKEN automatically. 
+ *   process.env.BLOB_READ_WRITE_TOKEN automatically.
  * - When running outside Vercel or against a different project, pass a
  *   read-write token via `token`.
  */
@@ -35,7 +35,7 @@ export interface VercelBlobConfig {
    * Access level for new blobs.
    *
    * Currently Vercel Blob only supports "public" access in the SDK options
-   * (the docs treat `access: 'public'` as required). 
+   * (the docs treat `access: 'public'` as required).
    */
   access?: "public";
 
@@ -49,7 +49,7 @@ export interface VercelBlobConfig {
 
   /**
    * Default Cache-Control max-age (in seconds) for blobs.
-   * See Vercel Blob caching docs. 
+   * See Vercel Blob caching docs.
    */
   cacheControlMaxAge?: number;
 
@@ -57,7 +57,7 @@ export interface VercelBlobConfig {
    * Use automatic multipart uploads for large files.
    *
    * When `true`, we pass `multipart: true` to `put()`, which lets Vercel
-   * handle splitting and parallelizing the upload under the hood. 
+   * handle splitting and parallelizing the upload under the hood.
    */
   multipart?: boolean;
 }
@@ -98,7 +98,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
   /**
    * Upload a file to Vercel Blob using the `put()` SDK method.
    *
-   * Docs: `put(pathname, body, options)` 
+   * Docs: `put(pathname, body, options)`
    */
   async upload(options: UploadOptions): Promise<FileInfo> {
     const { file, fileName, contentType, preserveKey, customKey } = options;
@@ -122,7 +122,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
       token: this.config.token,
     });
 
-    // The SDK returns url + downloadUrl; we prefer downloadUrl when present 
+    // The SDK returns url + downloadUrl; we prefer downloadUrl when present
     const path = blob.downloadUrl || blob.url;
 
     return {
@@ -141,7 +141,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    *  1. Resolve metadata with `head()` (by pathname)
    *  2. Fetch the blob URL over HTTP (stream → ArrayBuffer → Buffer)
    *
-   * Docs show `head("filepath", { token })` to retrieve metadata. 
+   * Docs show `head("filepath", { token })` to retrieve metadata.
    */
   async download(options: DownloadOptions): Promise<Buffer> {
     const fullPath = this.getFullPath(options.key);
@@ -153,21 +153,23 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
 
     const url = blobMeta.downloadUrl || blobMeta.url;
     if (!url) {
-      throw new Error(`Unable to resolve download URL for blob: ${options.key}`);
+      throw new Error(
+        `Unable to resolve download URL for blob: ${options.key}`,
+      );
     }
 
     // Step 2: stream the blob into memory using global fetch
     const fetchImpl: any = (globalThis as any).fetch;
     if (typeof fetchImpl !== "function") {
       throw new Error(
-        "globalThis.fetch is not available in this runtime; cannot download from Vercel Blob."
+        "globalThis.fetch is not available in this runtime; cannot download from Vercel Blob.",
       );
     }
 
     const res: any = await fetchImpl(url);
     if (!res.ok) {
       throw new Error(
-        `Failed to download blob ${options.key}: ${res.status} ${res.statusText}`
+        `Failed to download blob ${options.key}: ${res.status} ${res.statusText}`,
       );
     }
 
@@ -179,7 +181,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    * Delete a blob.
    *
    * The SDK’s `del()` accepts either a pathname or a URL and requires a
-   * read-write token (via env or `token` option). 
+   * read-write token (via env or `token` option).
    */
   async delete(options: DeleteOptions): Promise<void> {
     const fullPath = this.getFullPath(options.key);
@@ -192,7 +194,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
   /**
    * Vercel Blob doesn’t use classic presigned URLs for uploads/downloads.
    * Instead, it uses token-based client uploads via `@vercel/blob/client`
-   * and `handleUpload()` server routes. 
+   * and `handleUpload()` server routes.
    *
    * At this abstraction level, we stick to server-side uploads and don’t
    * expose presigned URLs.
