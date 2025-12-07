@@ -1,6 +1,6 @@
 {
   "name": "@circulo-ai/upload",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
   "type": "module",
   "private": false,
