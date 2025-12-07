@@ -155,6 +155,7 @@ const local = new LocalStorageProvider({
   serveBaseUrl: "/api/files",
 });
 ```
+
 #### Vercel Blob
 
 ```typescript
@@ -185,7 +186,6 @@ export async function POST(req: NextRequest) {
 
   return Response.json(info);
 }
-
 ```
 
 ### StorageManager
@@ -275,7 +275,7 @@ const parts = await Promise.all(
       PartNumber: partNumber,
       ETag: response.headers.get("ETag"),
     };
-  })
+  }),
 );
 
 // 4. Complete

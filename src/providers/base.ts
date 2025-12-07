@@ -38,14 +38,14 @@ export interface StorageProvider {
    * Generate a presigned URL for uploading
    */
   generatePresignedUploadUrl?(
-    options: PresignedUploadUrlOptions
+    options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse>;
 
   /**
    * Generate a presigned URL for downloading
    */
   generatePresignedDownloadUrl?(
-    options: PresignedDownloadUrlOptions
+    options: PresignedDownloadUrlOptions,
   ): Promise<string>;
 
   /**
@@ -62,14 +62,14 @@ export interface StorageProvider {
    * Initiate a multipart upload
    */
   initiateMultipartUpload?(
-    options: MultipartInitOptions
+    options: MultipartInitOptions,
   ): Promise<MultipartInitResponse>;
 
   /**
    * Get presigned URLs for uploading multiple parts
    */
   getMultipartPartUrls?(
-    options: MultipartPartUrlsOptions
+    options: MultipartPartUrlsOptions,
   ): Promise<MultipartPartUrl[]>;
 
   /**
@@ -77,7 +77,7 @@ export interface StorageProvider {
    * NOTE: The parts array type depends on the provider implementation
    */
   completeMultipartUpload?(
-    options: MultipartCompleteOptions
+    options: MultipartCompleteOptions,
   ): Promise<MultipartCompleteResponse>;
 
   /**
@@ -103,31 +103,31 @@ export abstract class BaseStorageProvider implements StorageProvider {
   }
 
   async generatePresignedUploadUrl(
-    _options: PresignedUploadUrlOptions
+    _options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse> {
     throw new Error("Presigned URLs not supported by this provider");
   }
 
   async generatePresignedDownloadUrl(
-    _options: PresignedDownloadUrlOptions
+    _options: PresignedDownloadUrlOptions,
   ): Promise<string> {
     throw new Error("Presigned URLs not supported by this provider");
   }
 
   async initiateMultipartUpload(
-    _options: MultipartInitOptions
+    _options: MultipartInitOptions,
   ): Promise<MultipartInitResponse> {
     throw new Error("Multipart upload not supported by this provider");
   }
 
   async getMultipartPartUrls(
-    _options: MultipartPartUrlsOptions
+    _options: MultipartPartUrlsOptions,
   ): Promise<MultipartPartUrl[]> {
     throw new Error("Multipart upload not supported by this provider");
   }
 
   async completeMultipartUpload(
-    _options: MultipartCompleteOptions
+    _options: MultipartCompleteOptions,
   ): Promise<MultipartCompleteResponse> {
     throw new Error("Multipart upload not supported by this provider");
   }
@@ -141,7 +141,7 @@ export abstract class BaseStorageProvider implements StorageProvider {
    */
   protected generateKey(
     fileName: string,
-    preserveKey: boolean = false
+    preserveKey: boolean = false,
   ): string {
     const safeFileName = fileName.replace(/\s+/g, "-");
     if (preserveKey) {
@@ -168,7 +168,7 @@ export abstract class BaseStorageProvider implements StorageProvider {
    */
   protected sanitizeMetadata(
     metadata: Record<string, string>,
-    maxLength: number = 2000
+    maxLength: number = 2000,
   ): Record<string, string> {
     const sanitized: Record<string, string> = {};
     for (const [key, value] of Object.entries(metadata)) {

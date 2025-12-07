@@ -29,54 +29,57 @@ export interface StorageManagerConfig<TContexts extends string = string> {
 /**
  * Options that include context selection
  */
-export interface ContextualUploadOptions<TContexts extends string = string>
-  extends UploadOptions {
+export interface ContextualUploadOptions<
+  TContexts extends string = string,
+> extends UploadOptions {
   /** Storage context/bucket to use (defaults to manager's defaultContext) */
   context?: TContexts;
 }
 
-export interface ContextualDownloadOptions<TContexts extends string = string>
-  extends DownloadOptions {
+export interface ContextualDownloadOptions<
+  TContexts extends string = string,
+> extends DownloadOptions {
   context?: TContexts;
 }
 
-export interface ContextualDeleteOptions<TContexts extends string = string>
-  extends DeleteOptions {
+export interface ContextualDeleteOptions<
+  TContexts extends string = string,
+> extends DeleteOptions {
   context?: TContexts;
 }
 
 export interface ContextualPresignedUploadUrlOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends PresignedUploadUrlOptions {
   context?: TContexts;
 }
 
 export interface ContextualPresignedDownloadUrlOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends PresignedDownloadUrlOptions {
   context?: TContexts;
 }
 
 export interface ContextualMultipartInitOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends MultipartInitOptions {
   context?: TContexts;
 }
 
 export interface ContextualMultipartPartUrlsOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends MultipartPartUrlsOptions {
   context?: TContexts;
 }
 
 export interface ContextualMultipartCompleteOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends MultipartCompleteOptions {
   context?: TContexts;
 }
 
 export interface ContextualMultipartAbortOptions<
-  TContexts extends string = string
+  TContexts extends string = string,
 > extends MultipartAbortOptions {
   context?: TContexts;
 }
@@ -114,7 +117,7 @@ export class StorageManager<TContexts extends string = string> {
     // Validate that default context exists
     if (!this.config.providers[this.config.defaultContext]) {
       throw new Error(
-        `Default context '${this.config.defaultContext}' not found in providers`
+        `Default context '${this.config.defaultContext}' not found in providers`,
       );
     }
   }
@@ -160,7 +163,7 @@ export class StorageManager<TContexts extends string = string> {
    * Download a file from storage
    */
   async download(
-    options: ContextualDownloadOptions<TContexts>
+    options: ContextualDownloadOptions<TContexts>,
   ): Promise<Buffer> {
     const { context, ...downloadOptions } = options;
     const provider = this.getProvider(context);
@@ -188,7 +191,7 @@ export class StorageManager<TContexts extends string = string> {
    * Generate a presigned URL for uploading
    */
   async generatePresignedUploadUrl(
-    options: ContextualPresignedUploadUrlOptions<TContexts>
+    options: ContextualPresignedUploadUrlOptions<TContexts>,
   ): Promise<PresignedUrlResponse> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
@@ -197,7 +200,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support presigned URLs`
+        }' does not support presigned URLs`,
       );
     }
 
@@ -208,7 +211,7 @@ export class StorageManager<TContexts extends string = string> {
    * Generate a presigned URL for downloading
    */
   async generatePresignedDownloadUrl(
-    options: ContextualPresignedDownloadUrlOptions<TContexts>
+    options: ContextualPresignedDownloadUrlOptions<TContexts>,
   ): Promise<string> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
@@ -217,7 +220,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support presigned URLs`
+        }' does not support presigned URLs`,
       );
     }
 
@@ -236,7 +239,7 @@ export class StorageManager<TContexts extends string = string> {
    * Initiate a multipart upload
    */
   async initiateMultipartUpload(
-    options: ContextualMultipartInitOptions<TContexts>
+    options: ContextualMultipartInitOptions<TContexts>,
   ): Promise<MultipartInitResponse> {
     const { context, ...initOptions } = options;
     const provider = this.getProvider(context);
@@ -245,7 +248,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support multipart upload`
+        }' does not support multipart upload`,
       );
     }
 
@@ -256,7 +259,7 @@ export class StorageManager<TContexts extends string = string> {
    * Get presigned URLs for uploading parts
    */
   async getMultipartPartUrls(
-    options: ContextualMultipartPartUrlsOptions<TContexts>
+    options: ContextualMultipartPartUrlsOptions<TContexts>,
   ): Promise<MultipartPartUrl[]> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
@@ -265,7 +268,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support multipart upload`
+        }' does not support multipart upload`,
       );
     }
 
@@ -276,7 +279,7 @@ export class StorageManager<TContexts extends string = string> {
    * Complete a multipart upload
    */
   async completeMultipartUpload(
-    options: ContextualMultipartCompleteOptions<TContexts>
+    options: ContextualMultipartCompleteOptions<TContexts>,
   ): Promise<MultipartCompleteResponse> {
     const { context, ...completeOptions } = options;
     const provider = this.getProvider(context);
@@ -285,7 +288,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support multipart upload`
+        }' does not support multipart upload`,
       );
     }
 
@@ -296,7 +299,7 @@ export class StorageManager<TContexts extends string = string> {
    * Abort a multipart upload
    */
   async abortMultipartUpload(
-    options: ContextualMultipartAbortOptions<TContexts>
+    options: ContextualMultipartAbortOptions<TContexts>,
   ): Promise<void> {
     const { context, ...abortOptions } = options;
     const provider = this.getProvider(context);
@@ -305,7 +308,7 @@ export class StorageManager<TContexts extends string = string> {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
-        }' does not support multipart upload`
+        }' does not support multipart upload`,
       );
     }
 
@@ -316,7 +319,7 @@ export class StorageManager<TContexts extends string = string> {
    * Batch upload multiple files
    */
   async uploadBatch(
-    files: ContextualUploadOptions<TContexts>[]
+    files: ContextualUploadOptions<TContexts>[],
   ): Promise<FileInfo[]> {
     return Promise.all(files.map((options) => this.upload(options)));
   }
@@ -325,10 +328,10 @@ export class StorageManager<TContexts extends string = string> {
    * Batch generate presigned upload URLs
    */
   async generatePresignedUploadUrlBatch(
-    requests: ContextualPresignedUploadUrlOptions<TContexts>[]
+    requests: ContextualPresignedUploadUrlOptions<TContexts>[],
   ): Promise<PresignedUrlResponse[]> {
     return Promise.all(
-      requests.map((options) => this.generatePresignedUploadUrl(options))
+      requests.map((options) => this.generatePresignedUploadUrl(options)),
     );
   }
 }

@@ -65,20 +65,20 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     if (config.connectionString) {
       this.client = BlobServiceClient.fromConnectionString(
-        config.connectionString
+        config.connectionString,
       );
     } else if (config.accountName && config.accountKey) {
       const credential = new StorageSharedKeyCredential(
         config.accountName,
-        config.accountKey
+        config.accountKey,
       );
       this.client = new BlobServiceClient(
         `https://${config.accountName}.blob.core.windows.net`,
-        credential
+        credential,
       );
     } else {
       throw new Error(
-        "Azure Blob config must include either connectionString or accountName + accountKey"
+        "Azure Blob config must include either connectionString or accountName + accountKey",
       );
     }
   }
@@ -106,7 +106,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
    */
   private getBlobClient(key: string): BlockBlobClient {
     const containerClient = this.client.getContainerClient(
-      this.config.containerName
+      this.config.containerName,
     );
     return containerClient.getBlockBlobClient(key);
   }
@@ -116,7 +116,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       options;
 
     const key = this.getFullKey(
-      customKey || this.generateKey(fileName, preserveKey)
+      customKey || this.generateKey(fileName, preserveKey),
     );
 
     const blobClient = this.getBlobClient(key);
@@ -170,7 +170,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
   }
 
   async generatePresignedUploadUrl(
-    options: PresignedUploadUrlOptions
+    options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse> {
     if (!this.config.accountName || !this.config.accountKey) {
       throw new Error("Account name and key required for SAS generation");
@@ -191,7 +191,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
-      this.config.accountKey
+      this.config.accountKey,
     );
 
     const sasToken = generateBlobSASQueryParameters(
@@ -202,7 +202,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
         startsOn,
         expiresOn,
       },
-      credential
+      credential,
     ).toString();
 
     // Build upload headers with metadata
@@ -225,7 +225,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
   }
 
   async generatePresignedDownloadUrl(
-    options: PresignedDownloadUrlOptions
+    options: PresignedDownloadUrlOptions,
   ): Promise<string> {
     if (!this.config.accountName || !this.config.accountKey) {
       throw new Error("Account name and key required for SAS generation");
@@ -241,7 +241,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
-      this.config.accountKey
+      this.config.accountKey,
     );
 
     const sasToken = generateBlobSASQueryParameters(
@@ -252,7 +252,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
         startsOn,
         expiresOn,
       },
-      credential
+      credential,
     ).toString();
 
     return `${blobClient.url}?${sasToken}`;
@@ -263,7 +263,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
   }
 
   async initiateMultipartUpload(
-    options: MultipartInitOptions
+    options: MultipartInitOptions,
   ): Promise<MultipartInitResponse> {
     const { fileName, contentType, metadata } = options;
 
@@ -274,7 +274,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     const key = this.getFullKey(
       `${Date.now()}-${Math.random()
         .toString(36)
-        .substring(2, 9)}-${safeFileName}`
+        .substring(2, 9)}-${safeFileName}`,
     );
 
     // Generate a unique upload ID
@@ -303,7 +303,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
   }
 
   async getMultipartPartUrls(
-    options: MultipartPartUrlsOptions
+    options: MultipartPartUrlsOptions,
   ): Promise<MultipartPartUrl[]> {
     if (!this.config.accountName || !this.config.accountKey) {
       throw new Error("Account name and key required for SAS generation");
@@ -316,13 +316,13 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
-      this.config.accountKey
+      this.config.accountKey,
     );
 
     return partNumbers.map((partNumber) => {
       // Azure uses block IDs (base64 encoded, same length)
       const blockId = Buffer.from(
-        `block-${partNumber.toString().padStart(6, "0")}`
+        `block-${partNumber.toString().padStart(6, "0")}`,
       ).toString("base64");
 
       const startsOn = new Date();
@@ -336,21 +336,21 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
           startsOn,
           expiresOn,
         },
-        credential
+        credential,
       ).toString();
 
       return {
         partNumber,
         blockId,
         url: `${blobClient.url}?comp=block&blockid=${encodeURIComponent(
-          blockId
+          blockId,
         )}&${sasToken}`,
       };
     });
   }
 
   async completeMultipartUpload(
-    options: MultipartCompleteOptions
+    options: MultipartCompleteOptions,
   ): Promise<MultipartCompleteResponse> {
     const { key, parts } = options;
     const fullKey = this.getFullKey(key);
@@ -361,7 +361,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     const azureParts: AzureUploadPart[] = parts.map((part) => {
       if (!isAzureUploadPart(part)) {
         throw new Error(
-          "Invalid part format for Azure Blob. Expected { blockId: string, partNumber: number }"
+          "Invalid part format for Azure Blob. Expected { blockId: string, partNumber: number }",
         );
       }
       return part;
@@ -405,7 +405,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
    * Convert readable stream to buffer
    */
   private streamToBuffer(
-    readableStream: NodeJS.ReadableStream
+    readableStream: NodeJS.ReadableStream,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
