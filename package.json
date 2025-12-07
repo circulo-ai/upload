@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "tsdown --watch",
     "build": "tsdown",
-    "test": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "release": "pnpm build && npm publish --access public"
   },
   "keywords": [
     "upload",
