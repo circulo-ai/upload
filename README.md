@@ -4,7 +4,7 @@ Universal file upload library with support for AWS S3, Azure Blob Storage, and l
 
 ## Features
 
-- 🌐 **Multi-provider support**: AWS S3, Azure Blob, Local storage
+- 🌐 **Multi-provider support**: AWS S3, Azure Blob, Local storage, Vercel Blob
 - 🪣 **Multi-bucket/container**: Organize files across different storage contexts
 - 📦 **Multipart uploads**: Large file support with resumable uploads
 - 🔐 **Presigned URLs**: Direct client-to-storage uploads
@@ -154,6 +154,38 @@ const local = new LocalStorageProvider({
   // Optional: Custom serve base URL
   serveBaseUrl: "/api/files",
 });
+```
+#### Vercel Blob
+
+```typescript
+import { VercelBlobStorageProvider } from "your-package";
+import type { NextRequest } from "next/server";
+
+const storage = new VercelBlobStorageProvider({
+  // Often unnecessary on Vercel; SDK uses BLOB_READ_WRITE_TOKEN by default
+  // token: process.env.BLOB_READ_WRITE_TOKEN,
+  pathPrefix: "uploads",
+  multipart: true, // let Vercel handle big uploads
+});
+
+export async function POST(req: NextRequest) {
+  const form = await req.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) {
+    return new Response("file is required", { status: 400 });
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  const info = await storage.upload({
+    file: buffer,
+    fileName: file.name,
+    contentType: file.type,
+  });
+
+  return Response.json(info);
+}
+
 ```
 
 ### StorageManager
