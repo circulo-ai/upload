@@ -1,0 +1,56 @@
+{
+  "name": "@circulo-ai/upload",
+  "version": "1.0.0",
+  "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
+  "type": "module",
+  "private": false,
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "prepublishOnly": "pnpm build"
+  },
+  "keywords": [
+    "upload",
+    "storage",
+    "s3",
+    "azure",
+    "blob",
+    "file-upload",
+    "multipart",
+    "presigned-url"
+  ],
+  "author": "Circulo AI",
+  "license": "MIT",
+  "peerDependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@azure/storage-blob": "^12.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    },
+    "@azure/storage-blob": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.645.0",
+    "@aws-sdk/s3-request-presigner": "^3.645.0",
+    "@azure/storage-blob": "^12.19.0",
+    "@types/node": "^20.10.0",
+    "tsdown": "^0.17.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
