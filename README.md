@@ -1,95 +1,3 @@
-// src/index.ts
-
-// Core types
-export type {
-FileInfo,
-FileMetadata,
-UploadOptions,
-DownloadOptions,
-DeleteOptions,
-PresignedUploadUrlOptions,
-PresignedDownloadUrlOptions,
-PresignedUrlResponse,
-S3UploadPart,
-AzureUploadPart,
-UploadPart,
-MultipartInitResponse,
-MultipartPartUrl,
-MultipartInitOptions,
-MultipartPartUrlsOptions,
-MultipartCompleteOptions,
-MultipartAbortOptions,
-MultipartCompleteResponse,
-ContentType,
-FileValidationError,
-SupportedDocumentExtension,
-SupportedAudioExtension,
-SupportedVideoExtension,
-SupportedMediaExtension,
-} from './types/core.js';
-
-export {
-SUPPORTED_DOCUMENT_EXTENSIONS,
-SUPPORTED_AUDIO_EXTENSIONS,
-SUPPORTED_VIDEO_EXTENSIONS,
-MAX_FILE_SIZE,
-} from './types/core.js';
-
-// Provider interfaces and base classes
-export { StorageProvider, BaseStorageProvider } from './providers/base.js';
-
-// Provider implementations
-export { S3StorageProvider, type S3Config } from './providers/s3.js';
-export {
-AzureBlobStorageProvider,
-type AzureBlobConfig,
-} from './providers/azure-blob.js';
-export {
-LocalStorageProvider,
-type LocalStorageConfig,
-} from './providers/local.js';
-
-// Storage manager
-export {
-StorageManager,
-type StorageManagerConfig,
-type ContextualUploadOptions,
-type ContextualDownloadOptions,
-type ContextualDeleteOptions,
-type ContextualPresignedUploadUrlOptions,
-type ContextualPresignedDownloadUrlOptions,
-type ContextualMultipartInitOptions,
-type ContextualMultipartPartUrlsOptions,
-type ContextualMultipartCompleteOptions,
-type ContextualMultipartAbortOptions,
-} from './storage-manager.js';
-
-// Utilities
-export {
-getContentType,
-isSupportedMimeType,
-getFileExtension,
-getMimeTypeFromExtension,
-validateFileType,
-validateFileSize,
-formatFileSize,
-MIME_TYPE_MAPPING,
-SUPPORTED_MIME_TYPES,
-SUPPORTED_AUDIO_MIME_TYPES,
-SUPPORTED_VIDEO_MIME_TYPES,
-} from './utils/validation.js';
-
-export {
-sanitizeFilename,
-isValidUrl,
-bufferToBase64,
-base64ToBuffer,
-} from './utils/security.js';
-
-// ============================================================================
-// README.md
-// ============================================================================
-
 # @circulo-ai/upload
 
 Universal file upload library with support for AWS S3, Azure Blob Storage, and local file system.
@@ -110,7 +18,7 @@ Universal file upload library with support for AWS S3, Azure Blob Storage, and l
 npm install @circulo-ai/upload
 
 # Install the storage provider(s) you need:
-npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner  # For S3
+npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner    # For S3
 npm install @azure/storage-blob                                 # For Azure Blob
 # Local storage has no dependencies
 ```
