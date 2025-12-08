@@ -1,11 +1,11 @@
 import { del, head, put } from "@vercel/blob";
-import { BaseStorageProvider } from "./base";
 import type {
   DeleteOptions,
   DownloadOptions,
   FileInfo,
   UploadOptions,
 } from "../types/core";
+import { BaseStorageProvider } from "./base";
 
 /**
  * Vercel Blob storage configuration

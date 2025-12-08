@@ -1,7 +1,7 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { FileRouteHandler, type FileHandlerConfig } from "./handler";
 import { getContentType } from "../utils/validation";
+import { FileRouteHandler, type FileHandlerConfig } from "./handler";
 
 export type { FileHandlerConfig } from "./handler";
 

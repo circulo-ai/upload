@@ -10,7 +10,6 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { BaseStorageProvider } from "./base";
 import type {
   DeleteOptions,
   DownloadOptions,
@@ -28,6 +27,7 @@ import type {
   S3UploadPart,
   UploadOptions,
 } from "../types/core";
+import { BaseStorageProvider } from "./base";
 
 /**
  * S3-compatible storage configuration
