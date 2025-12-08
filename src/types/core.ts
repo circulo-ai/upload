@@ -17,11 +17,13 @@ export interface FileInfo {
 /**
  * Metadata for files stored in cloud storage
  */
-export interface FileMetadata extends Record<string, string> {
+export interface FileMetadata {
   /** Original filename */
   originalName: string;
   /** Upload timestamp (ISO 8601) */
   uploadedAt: string;
+  /** Additional custom metadata */
+  [key: string]: string;
 }
 
 /**
@@ -178,10 +180,6 @@ export interface MultipartPartUrlsOptions {
 
 /**
  * Options for completing multipart upload
- *
- * The parts array should contain:
- * - S3UploadPart[] for S3-compatible providers
- * - AzureUploadPart[] for Azure Blob providers
  */
 export interface MultipartCompleteOptions {
   /** Upload ID from initiation */

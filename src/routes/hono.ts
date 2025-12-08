@@ -1,30 +1,20 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
-import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { FileRouteHandler, type FileHandlerConfig } from "./handler";
 import { getContentType } from "../utils/validation";
 
-// Re-export specific config type
 export type { FileHandlerConfig } from "./handler";
 
 export interface RouteConfig<E extends Env> {
-  /** Enable this route (default: true) */
   enabled?: boolean;
-  /** Middleware to apply before this route handler */
   middleware?: MiddlewareHandler<E>[];
 }
 
 export interface HonoFileRoutesOptions<E extends Env = Env> {
-  /**
-   * Callback to extract metadata from the request context.
-   * This metadata will be passed to the storage manager and saved with files.
-   * Use this to attach User ID, Tenant ID, etc.
-   */
   getUploadMetadata?: (
     c: Context<E>,
-  ) => Promise<Record<string, any>> | Record<string, any>;
+  ) => Promise<Record<string, string>> | Record<string, string>;
 
-  /** Configure specific routes */
   routes?: {
     delete?: RouteConfig<E>;
     download?: RouteConfig<E>;
@@ -36,6 +26,32 @@ export interface HonoFileRoutesOptions<E extends Env = Env> {
   };
 }
 
+interface FileBlob {
+  arrayBuffer(): Promise<ArrayBuffer>;
+  name: string;
+  type: string;
+  size: number;
+}
+
+function isFileBlob(value: unknown): value is FileBlob {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "arrayBuffer" in value &&
+    typeof (value as FileBlob).arrayBuffer === "function" &&
+    "name" in value &&
+    "type" in value &&
+    "size" in value
+  );
+}
+
+type UploadFile = {
+  buffer: Buffer;
+  name: string;
+  type: string;
+  size: number;
+};
+
 export function createHonoFileRoutes<E extends Env = Env>(
   config: FileHandlerConfig,
   options: HonoFileRoutesOptions<E> = {},
@@ -43,28 +59,24 @@ export function createHonoFileRoutes<E extends Env = Env>(
   const handler = new FileRouteHandler(config);
   const router = new Hono<E>();
 
-  const getMetadata = async (c: Context<E>) => {
-    if (options.getUploadMetadata) {
-      return await options.getUploadMetadata(c);
-    }
-    return {};
-  };
+  const getMetadata = async (c: Context<E>): Promise<Record<string, string>> =>
+    options.getUploadMetadata ? await options.getUploadMetadata(c) : {};
 
-  const isEnabled = (key: keyof NonNullable<typeof options.routes>) => {
-    return options.routes?.[key]?.enabled !== false;
-  };
+  type RouteKey = keyof NonNullable<HonoFileRoutesOptions<E>["routes"]>;
 
-  const getMiddleware = (key: keyof NonNullable<typeof options.routes>) => {
-    return options.routes?.[key]?.middleware || [];
-  };
+  const isEnabled = (key: RouteKey): boolean =>
+    options.routes?.[key]?.enabled !== false;
 
-  // --- Routes ---
+  const getMiddleware = (key: RouteKey): MiddlewareHandler<E>[] =>
+    options.routes?.[key]?.middleware ?? [];
 
   // DELETE
   if (isEnabled("delete")) {
     router.post("/delete", ...getMiddleware("delete"), async (c) => {
       try {
-        const { key, context } = await c.req.json();
+        const body = await c.req.json<{ key: string; context?: string }>();
+        const { key, context } = body;
+
         const result = await handler.handleDelete(key, context);
         return c.json(result);
       } catch (error) {
@@ -76,7 +88,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
     });
   }
 
-  // DOWNLOAD
+  // DOWNLOAD (manual zod parse -> no valid("json") bug)
   if (isEnabled("download")) {
     const downloadSchema = z.object({
       key: z.string(),
@@ -84,25 +96,25 @@ export function createHonoFileRoutes<E extends Env = Env>(
       context: z.string().optional(),
     });
 
-    router.post(
-      "/download",
-      ...getMiddleware("download"),
-      zValidator("json", downloadSchema),
-      async (c) => {
-        try {
-          const { key, name, context } = c.req.valid("json" as any);
-          const result = await handler.handleDownload(key, name, context);
-          return c.json(result);
-        } catch (error) {
-          return c.json(
-            {
-              error: error instanceof Error ? error.message : "Download failed",
-            },
-            500,
-          );
+    router.post("/download", ...getMiddleware("download"), async (c) => {
+      try {
+        const validated = downloadSchema.parse(await c.req.json());
+        const { key, name, context } = validated;
+
+        const result = await handler.handleDownload(key, name, context);
+        return c.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: error.flatten() }, 400);
         }
-      },
-    );
+        return c.json(
+          {
+            error: error instanceof Error ? error.message : "Download failed",
+          },
+          500,
+        );
+      }
+    });
   }
 
   // PRESIGNED SINGLE
@@ -113,38 +125,36 @@ export function createHonoFileRoutes<E extends Env = Env>(
       fileSize: z.number().positive(),
     });
 
-    router.post(
-      "/presigned",
-      ...getMiddleware("presigned"),
-      zValidator("json", presignedSchema),
-      async (c) => {
-        try {
-          const metadata = await getMetadata(c);
-          const { fileName, contentType, fileSize } = c.req.valid(
-            "json" as any,
-          );
-          const context = c.req.query("type") || c.req.query("context");
+    router.post("/presigned", ...getMiddleware("presigned"), async (c) => {
+      try {
+        const metadata = await getMetadata(c);
+        const validated = presignedSchema.parse(await c.req.json());
+        const { fileName, contentType, fileSize } = validated;
 
-          const result = await handler.handlePresigned(
-            { fileName, contentType, fileSize, context },
-            metadata,
-          );
-          return c.json(result);
-        } catch (error) {
-          if (error instanceof Error && error.message === "Unauthorized")
-            return c.json({ error: "Unauthorized" }, 401);
-          return c.json(
-            {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Failed to generate URL",
-            },
-            500,
-          );
+        const context =
+          c.req.query("type") ?? c.req.query("context") ?? undefined;
+
+        const result = await handler.handlePresigned(
+          { fileName, contentType, fileSize, context },
+          metadata,
+        );
+        return c.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: error.flatten() }, 400);
         }
-      },
-    );
+        if (error instanceof Error && error.message === "Unauthorized") {
+          return c.json({ error: "Unauthorized" }, 401);
+        }
+        return c.json(
+          {
+            error:
+              error instanceof Error ? error.message : "Failed to generate URL",
+          },
+          500,
+        );
+      }
+    });
   }
 
   // PRESIGNED BATCH
@@ -154,6 +164,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
       contentType: z.string().min(1),
       fileSize: z.number().positive(),
     });
+
     const batchSchema = z.object({
       files: z.array(batchFileSchema).min(1).max(100),
     });
@@ -161,12 +172,13 @@ export function createHonoFileRoutes<E extends Env = Env>(
     router.post(
       "/presigned/batch",
       ...getMiddleware("presignedBatch"),
-      zValidator("json", batchSchema),
       async (c) => {
         try {
           const metadata = await getMetadata(c);
-          const { files } = c.req.valid("json" as any);
-          const type = c.req.query("type");
+          const validated = batchSchema.parse(await c.req.json());
+          const { files } = validated;
+
+          const type = c.req.query("type") ?? undefined;
 
           const result = await handler.handleBatchPresigned(
             { files, type },
@@ -174,8 +186,12 @@ export function createHonoFileRoutes<E extends Env = Env>(
           );
           return c.json(result);
         } catch (error) {
-          if (error instanceof Error && error.message === "Unauthorized")
+          if (error instanceof z.ZodError) {
+            return c.json({ error: error.flatten() }, 400);
+          }
+          if (error instanceof Error && error.message === "Unauthorized") {
             return c.json({ error: "Unauthorized" }, 401);
+          }
           return c.json(
             {
               error:
@@ -192,29 +208,117 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
   // MULTIPART
   if (isEnabled("multipart")) {
+    // schemas that match your handler types exactly
+    const multipartInitiateSchema = z.object({
+      fileName: z.string().min(1),
+      contentType: z.string().min(1),
+      fileSize: z.number().positive(),
+      context: z.string().optional(),
+      metadata: z.record(z.string(), z.string()).optional(),
+    });
+
+    const multipartGetPartUrlsSchema = z.object({
+      uploadId: z.string().min(1),
+      key: z.string().min(1),
+      partNumbers: z.array(z.number().int().positive()).min(1),
+      context: z.string().optional(),
+    });
+
+    const partsSchema = z
+      .array(
+        z.union([
+          z.object({
+            PartNumber: z.number().int().positive(),
+            ETag: z.string().min(1),
+          }),
+          z.object({
+            blockId: z.string().min(1),
+            partNumber: z.number().int().positive(),
+          }),
+        ]),
+      )
+      .min(1);
+
+    const multipartCompleteSchema = z.object({
+      uploadId: z.string().min(1),
+      key: z.string().min(1),
+      parts: partsSchema,
+      context: z.string().optional(),
+    });
+
+    const multipartAbortSchema = z.object({
+      uploadId: z.string().min(1),
+      key: z.string().min(1),
+      context: z.string().optional(),
+    });
+
+    const multipartActionSchema = z.enum([
+      "initiate",
+      "get-part-urls",
+      "complete",
+      "abort",
+    ]);
+    type MultipartAction = z.infer<typeof multipartActionSchema>;
+
     router.post("/multipart", ...getMiddleware("multipart"), async (c) => {
       try {
         const metadata = await getMetadata(c);
-        const action = c.req.query("action");
-        const data = await c.req.json();
 
-        if (
-          !["initiate", "get-part-urls", "complete", "abort"].includes(
-            action as string,
-          )
-        ) {
-          return c.json({ error: "Invalid action" }, 400);
-        }
-
-        const result = await handler.handleMultipart(
-          action as any,
-          data,
-          metadata,
+        // Parse & narrow action to the literal union (never undefined)
+        const action: MultipartAction = multipartActionSchema.parse(
+          c.req.query("action"),
         );
-        return c.json(result);
+
+        const raw = await c.req.json();
+
+        switch (action) {
+          case "initiate": {
+            const data = multipartInitiateSchema.parse(raw);
+            const result = await handler.handleMultipart(
+              action,
+              data,
+              metadata,
+            );
+            return c.json(result);
+          }
+
+          case "get-part-urls": {
+            const data = multipartGetPartUrlsSchema.parse(raw);
+            const result = await handler.handleMultipart(
+              action,
+              data,
+              metadata,
+            );
+            return c.json(result);
+          }
+
+          case "complete": {
+            const data = multipartCompleteSchema.parse(raw);
+            const result = await handler.handleMultipart(
+              action,
+              data,
+              metadata,
+            );
+            return c.json(result);
+          }
+
+          case "abort": {
+            const data = multipartAbortSchema.parse(raw);
+            const result = await handler.handleMultipart(
+              action,
+              data,
+              metadata,
+            );
+            return c.json(result);
+          }
+        }
       } catch (error) {
-        if (error instanceof Error && error.message === "Unauthorized")
+        if (error instanceof z.ZodError) {
+          return c.json({ error: error.flatten() }, 400);
+        }
+        if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
+        }
         return c.json(
           {
             error:
@@ -234,7 +338,9 @@ export function createHonoFileRoutes<E extends Env = Env>(
       try {
         const metadata = await getMetadata(c);
         const formData = await c.req.parseBody({ all: true });
-        const context = formData["context"];
+
+        const contextRaw = formData["context"];
+        const context = typeof contextRaw === "string" ? contextRaw : undefined;
 
         const filesInput = formData["file"];
         const filesArray = Array.isArray(filesInput)
@@ -243,28 +349,29 @@ export function createHonoFileRoutes<E extends Env = Env>(
             ? [filesInput]
             : [];
 
-        const validFiles = [];
+        const validFiles: UploadFile[] = [];
+
         for (const f of filesArray) {
-          if (f && typeof f === "object" && "arrayBuffer" in f) {
-            // It's a File object (Blob)
+          if (isFileBlob(f)) {
             validFiles.push({
-              buffer: Buffer.from(await (f as File).arrayBuffer()),
-              name: (f as File).name,
-              type: (f as File).type,
-              size: (f as File).size,
+              buffer: Buffer.from(await f.arrayBuffer()),
+              name: f.name,
+              type: f.type,
+              size: f.size,
             });
           }
         }
 
         const result = await handler.handleUpload(
           validFiles,
-          typeof context === "string" ? context : undefined,
+          context,
           metadata,
         );
         return c.json(result);
       } catch (error) {
-        if (error instanceof Error && error.message === "Unauthorized")
+        if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
+        }
         return c.json(
           { error: error instanceof Error ? error.message : "Upload failed" },
           500,
@@ -277,24 +384,23 @@ export function createHonoFileRoutes<E extends Env = Env>(
   if (isEnabled("serve")) {
     router.get("/serve/*", ...getMiddleware("serve"), async (c) => {
       try {
-        const wildcard = c.req.param("*"); // files/serve/s3/... -> 's3/...'
-        const key = decodeURIComponent(wildcard || "");
-        const context = c.req.query("context");
+        const wildcard = c.req.param("*");
+        const key = decodeURIComponent(wildcard ?? "");
+        const context = c.req.query("context") ?? undefined;
 
         const { fileBuffer, filename } = await handler.handleServe(
           key,
           context,
         );
 
-        // Cast to string or provide default for Content-Type header compatibility
-        const contentType = (getContentType(filename) ||
-          "application/octet-stream") as string;
+        const contentType =
+          getContentType(filename) ?? "application/octet-stream";
 
         return new Response(fileBuffer, {
           status: 200,
           headers: {
             "Content-Type": contentType,
-            "Content-Disposition": 'inline; filename="' + filename + '"',
+            "Content-Disposition": `inline; filename="${filename}"`,
             "Cache-Control": "public, max-age=31536000",
             "X-Content-Type-Options": "nosniff",
           },

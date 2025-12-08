@@ -220,22 +220,22 @@ export function validateFileType(
   mimeType: string,
 ): FileValidationError | null {
   const extension = getFileExtension(fileName) as SupportedMediaExtension;
+  const baseMimeType = mimeType.split(";")[0]?.trim();
+
+  if (!baseMimeType) {
+    return {
+      code: "MIME_TYPE_MISMATCH",
+      message: "Invalid MIME type",
+      supportedTypes: [],
+    };
+  }
 
   // Check document types
   if (extension in SUPPORTED_MIME_TYPES) {
-    const baseMimeType = mimeType.split(";")[0]?.trim();
-    if (!baseMimeType) {
-      return {
-        code: "MIME_TYPE_MISMATCH",
-        message: "Invalid MIME type",
-        supportedTypes: [],
-      };
-    }
-
     const allowedMimeTypes =
       SUPPORTED_MIME_TYPES[extension as SupportedDocumentExtension];
 
-    if (!allowedMimeTypes?.includes(baseMimeType)) {
+    if (!allowedMimeTypes || !allowedMimeTypes.includes(baseMimeType)) {
       return {
         code: "MIME_TYPE_MISMATCH",
         message: `MIME type ${baseMimeType} does not match file extension ${extension}`,
@@ -248,19 +248,10 @@ export function validateFileType(
 
   // Check audio types
   if (extension in SUPPORTED_AUDIO_MIME_TYPES) {
-    const baseMimeType = mimeType.split(";")[0]?.trim();
-    if (!baseMimeType) {
-      return {
-        code: "MIME_TYPE_MISMATCH",
-        message: "Invalid MIME type",
-        supportedTypes: [],
-      };
-    }
-
     const allowedMimeTypes =
       SUPPORTED_AUDIO_MIME_TYPES[extension as SupportedAudioExtension];
 
-    if (!allowedMimeTypes?.includes(baseMimeType)) {
+    if (!allowedMimeTypes || !allowedMimeTypes.includes(baseMimeType)) {
       return {
         code: "MIME_TYPE_MISMATCH",
         message: `MIME type ${baseMimeType} does not match file extension ${extension}`,
@@ -273,19 +264,10 @@ export function validateFileType(
 
   // Check video types
   if (extension in SUPPORTED_VIDEO_MIME_TYPES) {
-    const baseMimeType = mimeType.split(";")[0]?.trim();
-    if (!baseMimeType) {
-      return {
-        code: "MIME_TYPE_MISMATCH",
-        message: "Invalid MIME type",
-        supportedTypes: [],
-      };
-    }
-
     const allowedMimeTypes =
       SUPPORTED_VIDEO_MIME_TYPES[extension as SupportedVideoExtension];
 
-    if (!allowedMimeTypes?.includes(baseMimeType)) {
+    if (!allowedMimeTypes || !allowedMimeTypes.includes(baseMimeType)) {
       return {
         code: "MIME_TYPE_MISMATCH",
         message: `MIME type ${baseMimeType} does not match file extension ${extension}`,
@@ -317,9 +299,7 @@ export function validateFileSize(
   if (fileSize > maxSize) {
     return {
       code: "FILE_TOO_LARGE",
-      message: `File size ${formatFileSize(
-        fileSize,
-      )} exceeds maximum ${formatFileSize(maxSize)}`,
+      message: `File size ${formatFileSize(fileSize)} exceeds maximum ${formatFileSize(maxSize)}`,
       supportedTypes: [],
     };
   }
@@ -336,7 +316,7 @@ export function formatFileSize(bytes: number, precision: number = 1): string {
   const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-  const value = bytes / k ** i;
+  const value = bytes / Math.pow(k, i);
   const formattedValue = Number.parseFloat(value.toFixed(precision));
 
   return `${formattedValue} ${sizes[i]}`;

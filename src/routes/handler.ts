@@ -1,4 +1,8 @@
 import type { StorageManager } from "../storage-manager";
+import type {
+  MultipartCompleteResponse,
+  MultipartInitResponse,
+} from "../types/core";
 import { MAX_FILE_SIZE } from "../types/core";
 import { validateFileSize, validateFileType } from "../utils/validation";
 
@@ -10,6 +14,138 @@ export interface FileHandlerConfig {
    * Defaults to: "/api/files/serve/" + encodeURIComponent(key)
    */
   serveUrlBuilder?: (key: string, context: string) => string;
+}
+
+export interface DeleteRequest {
+  key: string;
+  context?: string;
+}
+
+export interface DeleteResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface DownloadRequest {
+  key: string;
+  name?: string;
+  context?: string;
+}
+
+export interface DownloadResponse {
+  downloadUrl: string;
+  expiresIn: number | null;
+  fileName: string;
+}
+
+export interface PresignedRequest {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  context?: string;
+}
+
+export interface PresignedResponse {
+  fileName: string;
+  presignedUrl: string;
+  fileInfo: {
+    path: string;
+    key: string;
+    name: string;
+    size: number;
+    type: string;
+  };
+  uploadHeaders?: Record<string, string>;
+  directUploadSupported: boolean;
+}
+
+export interface BatchPresignedRequest {
+  files: Array<{
+    fileName: string;
+    contentType: string;
+    fileSize: number;
+  }>;
+  type?: string;
+}
+
+export interface BatchPresignedResponse {
+  files: PresignedResponse[];
+  directUploadSupported: boolean;
+}
+
+export interface MultipartInitiateData {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  context?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface MultipartGetPartUrlsData {
+  uploadId: string;
+  key: string;
+  partNumbers: number[];
+  context?: string;
+}
+
+export interface MultipartGetPartUrlsResponse {
+  presignedUrls: Array<{
+    partNumber: number;
+    url: string;
+    blockId?: string;
+  }>;
+}
+
+export interface MultipartCompleteData {
+  uploadId: string;
+  key: string;
+  parts: Array<
+    | { PartNumber: number; ETag: string }
+    | { blockId: string; partNumber: number }
+  >;
+  context?: string;
+}
+
+export interface MultipartAbortData {
+  uploadId: string;
+  key: string;
+  context?: string;
+}
+
+export interface MultipartAbortResponse {
+  success: boolean;
+}
+
+export type MultipartResponse =
+  | MultipartInitResponse
+  | MultipartGetPartUrlsResponse
+  | MultipartCompleteResponse
+  | MultipartAbortResponse;
+
+export interface UploadFile {
+  buffer: Buffer;
+  name: string;
+  type: string;
+  size: number;
+}
+
+export interface UploadResponse {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  key: string;
+  path: string;
+  url: string;
+  uploadedAt: string;
+  expiresAt: string;
+  context: string;
+}
+
+export interface ServeResponse {
+  fileBuffer: Buffer;
+  filename: string;
+  context: string;
 }
 
 export class FileRouteHandler {
@@ -31,8 +167,13 @@ export class FileRouteHandler {
       : "general";
   }
 
-  async handleDelete(key: string, contextInput?: string) {
-    if (!key) throw new Error("File key is required");
+  async handleDelete(
+    key: string,
+    contextInput?: string,
+  ): Promise<DeleteResponse> {
+    if (!key) {
+      throw new Error("File key is required");
+    }
 
     const context = this.getContext(contextInput);
     await this.storageManager.delete({ key, context });
@@ -40,7 +181,11 @@ export class FileRouteHandler {
     return { success: true, message: "File deleted successfully" };
   }
 
-  async handleDownload(key: string, name?: string, contextInput?: string) {
+  async handleDownload(
+    key: string,
+    name?: string,
+    contextInput?: string,
+  ): Promise<DownloadResponse> {
     const context = this.getContext(contextInput);
     const fileName = name || key.split("/").pop() || "download";
 
@@ -69,25 +214,24 @@ export class FileRouteHandler {
   }
 
   async handlePresigned(
-    input: {
-      fileName: string;
-      contentType: string;
-      fileSize: number;
-      context?: string;
-    },
-    metadata?: Record<string, any>,
-  ) {
+    input: PresignedRequest,
+    metadata?: Record<string, string>,
+  ): Promise<PresignedResponse> {
     const { fileName, contentType, fileSize, context: contextInput } = input;
     const context = this.getContext(contextInput);
 
     // Validate size
     const sizeError = validateFileSize(fileSize, this.maxFileSize);
-    if (sizeError) throw new Error(sizeError.message);
+    if (sizeError) {
+      throw new Error(sizeError.message);
+    }
 
     // Validate type for specific contexts
     if (context === "knowledge-base") {
       const typeError = validateFileType(fileName, contentType);
-      if (typeError) throw new Error(typeError.message);
+      if (typeError) {
+        throw new Error(typeError.message);
+      }
     }
 
     if (!this.storageManager.supportsPresignedUrls(context)) {
@@ -122,7 +266,7 @@ export class FileRouteHandler {
         expirationSeconds: 24 * 60 * 60,
       });
     } catch {
-      // ignore
+      // Ignore download URL generation errors
     }
 
     const finalPath = downloadUrl || this.serveUrlBuilder(result.key, context);
@@ -143,29 +287,26 @@ export class FileRouteHandler {
   }
 
   async handleBatchPresigned(
-    input: {
-      files: Array<{ fileName: string; contentType: string; fileSize: number }>;
-      type?: string;
-    },
-    metadata?: Record<string, any>,
-  ) {
+    input: BatchPresignedRequest,
+    metadata?: Record<string, string>,
+  ): Promise<BatchPresignedResponse> {
     const { files, type } = input;
-    // 'type' param in batch maps to context
     const context = this.getContext(type);
 
     // Validate all files first
     for (const file of files) {
       if (file.fileSize > this.maxFileSize) {
-        throw new Error("File " + file.fileName + " exceeds maximum size");
+        throw new Error(`File ${file.fileName} exceeds maximum size`);
       }
       if (context === "knowledge-base") {
         const typeError = validateFileType(file.fileName, file.contentType);
-        if (typeError) throw new Error(typeError.message);
+        if (typeError) {
+          throw new Error(typeError.message);
+        }
       }
     }
 
     if (!this.storageManager.supportsPresignedUrls(context)) {
-      // Fallback response for batch when cloud not available
       return {
         files: files.map((file) => ({
           fileName: file.fileName,
@@ -198,7 +339,11 @@ export class FileRouteHandler {
 
     return {
       files: results.map((result, index) => {
-        const file = files[index]!;
+        const file = files[index];
+        if (!file) {
+          throw new Error("File index mismatch");
+        }
+
         const finalPath = this.serveUrlBuilder(result.key, context);
 
         return {
@@ -221,27 +366,31 @@ export class FileRouteHandler {
 
   async handleMultipart(
     action: "initiate" | "get-part-urls" | "complete" | "abort",
-    data: any,
-    metadata?: Record<string, any>,
-  ) {
+    data:
+      | MultipartInitiateData
+      | MultipartGetPartUrlsData
+      | MultipartCompleteData
+      | MultipartAbortData,
+    metadata?: Record<string, string>,
+  ): Promise<MultipartResponse> {
     const context = this.getContext(data.context);
 
     if (!this.storageManager.supportsMultipartUpload(context)) {
       throw new Error(
-        "Provider for " + context + " doesn't support multipart upload",
+        `Provider for ${context} doesn't support multipart upload`,
       );
     }
 
     switch (action) {
       case "initiate": {
+        const initiateData = data as MultipartInitiateData;
         const {
           fileName,
           contentType,
           fileSize,
           metadata: clientMetadata,
-        } = data;
-        // Merge client provided metadata with server metadata (server metadata takes precedence or merge?)
-        // Generally relying on server metadata for auth related things.
+        } = initiateData;
+
         return this.storageManager.initiateMultipartUpload({
           fileName,
           contentType,
@@ -251,17 +400,22 @@ export class FileRouteHandler {
         });
       }
       case "get-part-urls": {
-        const { uploadId, key, partNumbers } = data;
+        const urlData = data as MultipartGetPartUrlsData;
+        const { uploadId, key, partNumbers } = urlData;
+
         const urls = await this.storageManager.getMultipartPartUrls({
           uploadId,
           key,
           partNumbers,
           context,
         });
+
         return { presignedUrls: urls };
       }
       case "complete": {
-        const { uploadId, key, parts } = data;
+        const completeData = data as MultipartCompleteData;
+        const { uploadId, key, parts } = completeData;
+
         return this.storageManager.completeMultipartUpload({
           uploadId,
           key,
@@ -270,40 +424,49 @@ export class FileRouteHandler {
         });
       }
       case "abort": {
-        const { uploadId, key } = data;
+        const abortData = data as MultipartAbortData;
+        const { uploadId, key } = abortData;
+
         await this.storageManager.abortMultipartUpload({
           uploadId,
           key,
           context,
         });
+
         return { success: true };
       }
-      default:
-        throw new Error("Invalid multipart action");
+      default: {
+        const exhaustiveCheck: never = action;
+        throw new Error(`Invalid multipart action: ${exhaustiveCheck}`);
+      }
     }
   }
 
   async handleUpload(
-    files: Array<{ buffer: Buffer; name: string; type: string; size: number }>,
+    files: UploadFile[],
     contextInput: string | undefined,
-    metadata?: Record<string, any>,
-  ) {
+    metadata?: Record<string, string>,
+  ): Promise<UploadResponse | { files: UploadResponse[] }> {
     if (!files || files.length === 0) {
       throw new Error("No files provided");
     }
 
     const context = this.getContext(contextInput);
-    const uploadResults = [];
+    const uploadResults: UploadResponse[] = [];
 
     for (const file of files) {
       // Validate size
       const sizeError = validateFileSize(file.size, this.maxFileSize);
-      if (sizeError) throw new Error(sizeError.message);
+      if (sizeError) {
+        throw new Error(sizeError.message);
+      }
 
       // Validate type
       if (context === "knowledge-base") {
         const typeError = validateFileType(file.name, file.type);
-        if (typeError) throw new Error(typeError.message);
+        if (typeError) {
+          throw new Error(typeError.message);
+        }
       }
 
       const fileInfo = await this.storageManager.upload({
@@ -327,7 +490,7 @@ export class FileRouteHandler {
             expirationSeconds: 24 * 60 * 60,
           });
         } catch {
-          // ignore
+          // Ignore download URL generation errors
         }
       }
 
@@ -350,8 +513,13 @@ export class FileRouteHandler {
       : { files: uploadResults };
   }
 
-  async handleServe(key: string, contextInput?: string) {
-    if (!key) throw new Error("No file key provided");
+  async handleServe(
+    key: string,
+    contextInput?: string,
+  ): Promise<ServeResponse> {
+    if (!key) {
+      throw new Error("No file key provided");
+    }
     const context = this.getContext(contextInput);
 
     const fileBuffer = await this.storageManager.download({ key, context });
