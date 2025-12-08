@@ -5,7 +5,6 @@ import {
   generateBlobSASQueryParameters,
   StorageSharedKeyCredential,
 } from "@azure/storage-blob";
-import { BaseStorageProvider } from "./base";
 import type {
   AzureUploadPart,
   DeleteOptions,
@@ -23,6 +22,7 @@ import type {
   PresignedUrlResponse,
   UploadOptions,
 } from "../types/core";
+import { BaseStorageProvider } from "./base";
 
 /**
  * Azure Blob Storage configuration
