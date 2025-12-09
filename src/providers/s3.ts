@@ -96,10 +96,12 @@ export class S3StorageProvider extends BaseStorageProvider {
    * Get the full key including path prefix
    */
   private getFullKey(key: string): string {
-    if (!this.config.pathPrefix) {
+    const prefix = this.config.pathPrefix?.replace(/\/$/, "");
+    if (!prefix) return key;
+    // Avoid double-prefixing when caller already includes the prefix
+    if (key === prefix || key.startsWith(`${prefix}/`)) {
       return key;
     }
-    const prefix = this.config.pathPrefix.replace(/\/$/, "");
     return `${prefix}/${key}`;
   }
 
@@ -107,7 +109,7 @@ export class S3StorageProvider extends BaseStorageProvider {
    * Get serve path for a file
    */
   private getServePath(key: string): string {
-    return `/api/files/serve/s3/${encodeURIComponent(key)}`;
+    return `/api/files/serve/${encodeURIComponent(key)}`;
   }
 
   async upload(options: UploadOptions): Promise<FileInfo> {

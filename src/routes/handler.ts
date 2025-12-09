@@ -48,6 +48,7 @@ export interface PresignedRequest {
 export interface PresignedResponse {
   fileName: string;
   presignedUrl: string;
+  downloadUrl?: string;
   fileInfo: {
     path: string;
     key: string;
@@ -137,6 +138,7 @@ export interface UploadResponse {
   key: string;
   path: string;
   url: string;
+  downloadUrl?: string;
   uploadedAt: string;
   expiresAt: string;
   context: string;
@@ -158,7 +160,10 @@ export class FileRouteHandler {
     this.maxFileSize = config.maxFileSize || MAX_FILE_SIZE;
     this.serveUrlBuilder =
       config.serveUrlBuilder ||
-      ((key) => "/api/files/serve/" + encodeURIComponent(key));
+      ((key, context) =>
+        `/api/files/serve/${encodeURIComponent(key)}${
+          context ? `?context=${encodeURIComponent(context)}` : ""
+        }`);
   }
 
   private getContext(contextInput?: string): string {
@@ -269,13 +274,15 @@ export class FileRouteHandler {
       // Ignore download URL generation errors
     }
 
-    const finalPath = downloadUrl || this.serveUrlBuilder(result.key, context);
+    const servePath = this.serveUrlBuilder(result.key, context);
 
     return {
       fileName,
       presignedUrl: result.url,
+      downloadUrl,
       fileInfo: {
-        path: finalPath,
+        // Keep a stable, non-expiring serve path
+        path: servePath,
         key: result.key,
         name: fileName,
         size: fileSize,
@@ -344,13 +351,16 @@ export class FileRouteHandler {
           throw new Error("File index mismatch");
         }
 
-        const finalPath = this.serveUrlBuilder(result.key, context);
+        const servePath = this.serveUrlBuilder(result.key, context);
 
         return {
           fileName: file.fileName,
           presignedUrl: result.url,
+          // propagate downloadUrl if the provider supports it
+          // (currently only single presign populates downloadUrl)
+          downloadUrl: undefined,
           fileInfo: {
-            path: finalPath,
+            path: servePath,
             key: result.key,
             name: file.fileName,
             size: file.fileSize,
@@ -494,14 +504,17 @@ export class FileRouteHandler {
         }
       }
 
+      const servePath = this.serveUrlBuilder(fileInfo.key, context);
+
       uploadResults.push({
         id: fileInfo.key,
         name: file.name,
         size: file.buffer.length,
         type: file.type,
         key: fileInfo.key,
-        path: fileInfo.path,
-        url: downloadUrl || fileInfo.path,
+        path: servePath,
+        url: downloadUrl || servePath,
+        downloadUrl,
         uploadedAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         context,

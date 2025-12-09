@@ -384,8 +384,11 @@ export function createHonoFileRoutes<E extends Env = Env>(
   if (isEnabled("serve")) {
     router.get("/serve/*", ...getMiddleware("serve"), async (c) => {
       try {
-        const wildcard = c.req.param("*");
-        const key = decodeURIComponent(wildcard ?? "");
+        // Always slice the path to avoid surprises with encoded slashes
+        const path = c.req.path;
+        const idx = path.indexOf("/serve/");
+        const rawKey = idx >= 0 ? path.slice(idx + "/serve/".length) : "";
+        const key = decodeURIComponent(rawKey);
         const context = c.req.query("context") ?? undefined;
 
         const { fileBuffer, filename } = await handler.handleServe(
