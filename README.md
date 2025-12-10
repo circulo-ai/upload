@@ -320,6 +320,39 @@ console.log(formatFileSize(1536000)); // "1.5 MB"
 const ext = getFileExtension("photo.jpg"); // "jpg"
 ```
 
+### Next.js route handler
+
+Add a catch-all route (e.g., `app/api/files/[...path]/route.ts`) and point both `GET` and `POST` to the generated handler.
+
+```typescript
+import { LocalStorageProvider, StorageManager } from "@circulo-ai/upload";
+import { createNextFileHandler } from "@circulo-ai/upload/next";
+
+const handler = createNextFileHandler({
+  storageManager: new StorageManager({
+    providers: {
+      uploads: new LocalStorageProvider({ basePath: "./uploads" }),
+    },
+    defaultContext: "uploads",
+  }),
+});
+
+export const GET = handler;
+export const POST = handler;
+```
+
+Available paths under that route:
+
+- `POST /delete` – delete by key (JSON: `{ key, context? }`)
+- `POST /download` – get a download URL (JSON: `{ key, name?, context? }`)
+- `POST /presigned` – single upload URL (JSON: `{ fileName, contentType, fileSize }`, query `type`/`context`)
+- `POST /presigned/batch` – multiple upload URLs (JSON: `{ files: [...] }`, query `type`)
+- `POST /multipart?action=initiate|get-part-urls|complete|abort` – multipart helpers
+- `POST /upload` – multipart form with `file` field
+- `GET /serve/:key` – stream file contents (optional `context` query)
+
+If you keep a dedicated file for one route (for example, `/presigned`), pass `defaultRoute: "presigned"` when creating the handler.
+
 ## Configuration Examples
 
 ### AWS S3 with Environment Variables

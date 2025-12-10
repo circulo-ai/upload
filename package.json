@@ -4,6 +4,22 @@
   "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
   "type": "module",
   "private": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./hono": {
+      "types": "./dist/routes/hono.d.ts",
+      "default": "./dist/routes/hono.js"
+    },
+    "./next": {
+      "types": "./dist/routes/next.d.ts",
+      "default": "./dist/routes/next.js"
+    }
+  },
   "scripts": {
     "dev": "tsdown --watch",
     "build": "tsdown",
