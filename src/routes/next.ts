@@ -189,7 +189,9 @@ export function createNextFileHandler<Req extends Request = Request>(
     context?: NextRouteHandlerContext,
   ): { route: RouteKey; rest: string[] } | null => {
     const params = context?.params ?? {};
-    const values = Object.values(params) as Array<string | string[] | undefined>;
+    const values = Object.values(params) as Array<
+      string | string[] | undefined
+    >;
     const raw =
       (params[pathParam] as string[] | string | undefined) ??
       (values.find((value) => Array.isArray(value)) as string[] | undefined) ??
@@ -288,9 +290,11 @@ export function createNextFileHandler<Req extends Request = Request>(
             return methodNotAllowed();
           }
 
-          const { key, name, context: fileContext } = downloadSchema.parse(
-            await req.json(),
-          );
+          const {
+            key,
+            name,
+            context: fileContext,
+          } = downloadSchema.parse(await req.json());
           const result = await handler.handleDownload(key, name, fileContext);
           return json(result);
         }
@@ -445,7 +449,7 @@ export function createNextFileHandler<Req extends Request = Request>(
             ? routeInfo.rest
                 .map((segment) => decodeURIComponent(segment))
                 .join("/")
-            : url.searchParams.get("key") ?? "";
+            : (url.searchParams.get("key") ?? "");
 
           if (!keyFromPath) {
             return json({ error: "No file key provided" }, 400);
