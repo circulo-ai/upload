@@ -4,20 +4,27 @@
   "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
   "type": "module",
   "private": false,
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.mjs"
     },
     "./hono": {
-      "types": "./dist/routes/hono.d.ts",
-      "default": "./dist/routes/hono.js"
+      "types": "./dist/routes/hono.d.mts",
+      "import": "./dist/routes/hono.mjs",
+      "require": "./dist/routes/hono.cjs",
+      "default": "./dist/routes/hono.mjs"
     },
     "./next": {
-      "types": "./dist/routes/next.d.ts",
-      "default": "./dist/routes/next.js"
+      "types": "./dist/routes/next.d.mts",
+      "import": "./dist/routes/next.mjs",
+      "require": "./dist/routes/next.cjs",
+      "default": "./dist/routes/next.mjs"
     }
   },
   "scripts": {
