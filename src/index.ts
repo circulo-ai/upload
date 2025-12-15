@@ -62,6 +62,30 @@ export {
   type StorageManagerConfig,
 } from "./storage-manager";
 
+// Route handler
+export {
+  FileRouteHandler,
+  type BatchPresignedRequest,
+  type BatchPresignedResponse,
+  type DeleteRequest,
+  type DeleteResponse,
+  type DownloadRequest,
+  type DownloadResponse,
+  type FileHandlerConfig,
+  type MultipartAbortData,
+  type MultipartAbortResponse,
+  type MultipartCompleteData,
+  type MultipartGetPartUrlsData,
+  type MultipartGetPartUrlsResponse,
+  type MultipartInitiateData,
+  type MultipartResponse,
+  type PresignedRequest,
+  type PresignedResponse,
+  type ServeResponse,
+  type UploadFile,
+  type UploadResponse,
+} from "./routes/handler";
+
 // Utilities
 export {
   MIME_TYPE_MAPPING,
