@@ -1,6 +1,6 @@
 # @circulo-ai/upload
 
-Universal file upload library with support for AWS S3, Azure Blob Storage, and local file system.
+Universal file upload library with support for AWS S3, Azure Blob Storage, Vercel Blob, and local file system.
 
 ## Features
 
@@ -11,6 +11,7 @@ Universal file upload library with support for AWS S3, Azure Blob Storage, and l
 - 📝 **TypeScript**: Full type safety with generics
 - 🎯 **Zero dependencies**: Only peer dependencies for storage providers you use
 - 🔒 **Secure**: Built-in path traversal protection and filename sanitization
+- 🧩 **Extensible**: Lifecycle hooks and structured errors for predictable DX
 
 ## Installation
 
@@ -159,7 +160,7 @@ const local = new LocalStorageProvider({
 #### Vercel Blob
 
 ```typescript
-import { VercelBlobStorageProvider } from "your-package";
+import { VercelBlobStorageProvider } from "@circulo-ai/upload";
 import type { NextRequest } from "next/server";
 
 const storage = new VercelBlobStorageProvider({
@@ -292,6 +293,29 @@ await manager.abortMultipartUpload({
   key,
   context: "primary",
 });
+```
+
+### Route handlers, hooks, and errors
+
+`FileRouteHandler` lets you plug in logging/analytics and get consistent error codes from the generated Next.js/Hono routes.
+
+```typescript
+import { FileRouteHandler } from "@circulo-ai/upload";
+
+const handler = new FileRouteHandler({
+  storageManager: manager,
+  hooks: {
+    beforeUpload: (file, context) => console.log("uploading", file.name, context),
+    afterUpload: (upload, context) => console.log("uploaded", upload.key, context),
+    onError: (error, context) => console.error("upload error", { error, context }),
+  },
+});
+```
+
+Errors are instances of `UploadError` (also exported) and the HTTP responses from `createNextFileHandler` / `createHonoFileRoutes` are shaped like:
+
+```json
+{ "error": "File size ...", "code": "FILE_TOO_LARGE", "details": { "maxSize": 104857600 } }
 ```
 
 ### Validation Utilities

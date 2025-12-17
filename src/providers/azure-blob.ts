@@ -211,9 +211,13 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       "x-ms-blob-content-type": contentType,
     };
 
-    if (metadata) {
-      for (const [k, v] of Object.entries(metadata)) {
-        uploadHeaders[`x-ms-meta-${k}`] = encodeURIComponent(v);
+    const sanitizedMetadata = metadata
+      ? this.sanitizeMetadata(metadata, 8000)
+      : undefined;
+
+    if (sanitizedMetadata) {
+      for (const [k, v] of Object.entries(sanitizedMetadata)) {
+        uploadHeaders[`x-ms-meta-${k}`] = v;
       }
     }
 

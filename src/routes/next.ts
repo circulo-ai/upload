@@ -5,6 +5,7 @@ import {
   type FileHandlerConfig,
   type UploadFile,
 } from "./handler";
+import { UploadError } from "../utils/errors";
 
 type RouteKey =
   | "delete"
@@ -460,6 +461,26 @@ export function createNextFileHandler<Req extends Request = Request>(
             url.searchParams.get("type") ??
             undefined;
 
+          // For HEAD, avoid downloading the full file when we can redirect to a presigned URL
+          if (req.method === "HEAD") {
+            try {
+              const downloadInfo = await handler.handleDownload(
+                keyFromPath,
+                undefined,
+                contextParam ?? undefined,
+              );
+
+              if (downloadInfo.expiresIn !== null && downloadInfo.downloadUrl) {
+                return new Response(null, {
+                  status: 307,
+                  headers: { Location: downloadInfo.downloadUrl },
+                });
+              }
+            } catch {
+              // Fall back to downloading if presign fails
+            }
+          }
+
           const { fileBuffer, filename } = await handler.handleServe(
             keyFromPath,
             contextParam ?? undefined,
@@ -497,7 +518,17 @@ export function createNextFileHandler<Req extends Request = Request>(
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return json({ error: error.flatten() }, 400);
+        return json({ error: z.treeifyError(error) }, 400);
+      }
+      if (error instanceof UploadError) {
+        return json(
+          {
+            error: error.message,
+            code: error.code,
+            details: error.details,
+          },
+          error.status,
+        );
       }
       if (error instanceof Error && error.message === "Unauthorized") {
         return json({ error: "Unauthorized" }, 401);

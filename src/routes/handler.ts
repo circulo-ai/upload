@@ -4,6 +4,8 @@ import type {
   MultipartInitResponse,
 } from "../types/core";
 import { MAX_FILE_SIZE } from "../types/core";
+import { UploadError } from "../utils/errors";
+import { sanitizeFilename } from "../utils/security";
 import { validateFileSize, validateFileType } from "../utils/validation";
 
 export interface FileHandlerConfig {
@@ -14,6 +16,16 @@ export interface FileHandlerConfig {
    * Defaults to: "/api/files/serve/" + encodeURIComponent(key)
    */
   serveUrlBuilder?: (key: string, context: string) => string;
+  hooks?: FileHandlerHooks;
+}
+
+export interface FileHandlerHooks {
+  beforeUpload?: (file: UploadFile, context: string) => Promise<void> | void;
+  afterUpload?: (
+    upload: UploadResponse,
+    context: string,
+  ) => Promise<void> | void;
+  onError?: (error: Error, context?: string) => Promise<void> | void;
 }
 
 export interface DeleteRequest {
@@ -154,10 +166,12 @@ export class FileRouteHandler {
   private storageManager: StorageManager;
   private maxFileSize: number;
   private serveUrlBuilder: (key: string, context: string) => string;
+  private hooks?: FileHandlerHooks;
 
   constructor(config: FileHandlerConfig) {
     this.storageManager = config.storageManager;
     this.maxFileSize = config.maxFileSize || MAX_FILE_SIZE;
+    this.hooks = config.hooks;
     this.serveUrlBuilder =
       config.serveUrlBuilder ||
       ((key, context) =>
@@ -166,10 +180,47 @@ export class FileRouteHandler {
         }`);
   }
 
+  private async emitError(error: Error, context?: string): Promise<void> {
+    if (!this.hooks?.onError) return;
+    try {
+      await this.hooks.onError(error, context);
+    } catch {
+      // Swallow hook errors to avoid masking primary failures
+    }
+  }
+
+  private async runBeforeUpload(
+    file: UploadFile,
+    context: string,
+  ): Promise<void> {
+    if (this.hooks?.beforeUpload) {
+      await this.hooks.beforeUpload(file, context);
+    }
+  }
+
+  private async runAfterUpload(
+    upload: UploadResponse,
+    context: string,
+  ): Promise<void> {
+    if (this.hooks?.afterUpload) {
+      await this.hooks.afterUpload(upload, context);
+    }
+  }
+
   private getContext(contextInput?: string): string {
-    return contextInput && this.storageManager.hasContext(contextInput)
-      ? contextInput
-      : "general";
+    if (!contextInput) {
+      return this.storageManager.getDefaultContext();
+    }
+
+    if (this.storageManager.hasContext(contextInput)) {
+      return contextInput;
+    }
+
+    throw new UploadError(
+      "UNKNOWN_CONTEXT",
+      `Storage context '${contextInput}' is not configured`,
+      { context: contextInput },
+    );
   }
 
   async handleDelete(
@@ -177,11 +228,16 @@ export class FileRouteHandler {
     contextInput?: string,
   ): Promise<DeleteResponse> {
     if (!key) {
-      throw new Error("File key is required");
+      throw new UploadError("MISSING_KEY", "File key is required");
     }
 
     const context = this.getContext(contextInput);
-    await this.storageManager.delete({ key, context });
+    try {
+      await this.storageManager.delete({ key, context });
+    } catch (error) {
+      await this.emitError(error as Error, context);
+      throw error;
+    }
 
     return { success: true, message: "File deleted successfully" };
   }
@@ -192,30 +248,52 @@ export class FileRouteHandler {
     contextInput?: string,
   ): Promise<DownloadResponse> {
     const context = this.getContext(contextInput);
-    const fileName = name || key.split("/").pop() || "download";
+    const rawName = name || key.split("/").pop() || "download";
+    const fileName = sanitizeFilename(rawName);
 
-    if (this.storageManager.supportsPresignedUrls(context)) {
-      const downloadUrl =
-        await this.storageManager.generatePresignedDownloadUrl({
-          key,
-          context,
-          expirationSeconds: 5 * 60,
-        });
+    try {
+      if (this.storageManager.supportsPresignedUrls(context)) {
+        const downloadUrl =
+          await this.storageManager.generatePresignedDownloadUrl({
+            key,
+            context,
+            expirationSeconds: 5 * 60,
+          });
 
+        return {
+          downloadUrl,
+          expiresIn: 300,
+          fileName,
+        };
+      }
+
+      // Local/Server fallback
+      const downloadUrl = this.serveUrlBuilder(key, context);
       return {
         downloadUrl,
-        expiresIn: 300,
+        expiresIn: null,
         fileName,
       };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Download failed";
+      const status =
+        message.toLowerCase().includes("not found") ||
+        message.toLowerCase().includes("missing")
+          ? 404
+          : 500;
+      const uploadError =
+        error instanceof UploadError
+          ? error
+          : new UploadError(
+              "DOWNLOAD_FAILED",
+              message,
+              { key, context },
+              status,
+            );
+      await this.emitError(uploadError, context);
+      throw uploadError;
     }
-
-    // Local/Server fallback
-    const downloadUrl = this.serveUrlBuilder(key, context);
-    return {
-      downloadUrl,
-      expiresIn: null,
-      fileName,
-    };
   }
 
   async handlePresigned(
@@ -225,72 +303,84 @@ export class FileRouteHandler {
     const { fileName, contentType, fileSize, context: contextInput } = input;
     const context = this.getContext(contextInput);
 
-    // Validate size
-    const sizeError = validateFileSize(fileSize, this.maxFileSize);
-    if (sizeError) {
-      throw new Error(sizeError.message);
-    }
-
-    // Validate type for specific contexts
-    if (context === "knowledge-base") {
-      const typeError = validateFileType(fileName, contentType);
-      if (typeError) {
-        throw new Error(typeError.message);
+    try {
+      const sizeError = validateFileSize(fileSize, this.maxFileSize);
+      if (sizeError) {
+        throw new UploadError(
+          sizeError.code,
+          sizeError.message,
+          { maxSize: this.maxFileSize, size: fileSize },
+          400,
+        );
       }
-    }
 
-    if (!this.storageManager.supportsPresignedUrls(context)) {
+      if (context === "knowledge-base") {
+        const typeError = validateFileType(fileName, contentType);
+        if (typeError) {
+          throw new UploadError(
+            typeError.code,
+            typeError.message,
+            { supportedTypes: typeError.supportedTypes },
+            400,
+          );
+        }
+      }
+
+      if (!this.storageManager.supportsPresignedUrls(context)) {
+        return {
+          fileName,
+          presignedUrl: "",
+          fileInfo: {
+            path: "",
+            key: "",
+            name: fileName,
+            size: fileSize,
+            type: contentType,
+          },
+          directUploadSupported: false,
+        };
+      }
+
+      const result = await this.storageManager.generatePresignedUploadUrl({
+        fileName,
+        contentType,
+        fileSize,
+        context,
+        expirationSeconds: 3600,
+        metadata,
+      });
+
+      let downloadUrl: string | undefined;
+      try {
+        downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
+          key: result.key,
+          context,
+          expirationSeconds: 24 * 60 * 60,
+        });
+      } catch {
+        // Ignore download URL generation errors
+      }
+
+      const servePath = this.serveUrlBuilder(result.key, context);
+
       return {
         fileName,
-        presignedUrl: "",
+        presignedUrl: result.url,
+        downloadUrl,
         fileInfo: {
-          path: "",
-          key: "",
+          path: servePath,
+          key: result.key,
           name: fileName,
           size: fileSize,
           type: contentType,
         },
-        directUploadSupported: false,
+        uploadHeaders: result.uploadHeaders,
+        directUploadSupported: true,
       };
+    } catch (error) {
+      await this.emitError(error as Error, context);
+      throw error;
     }
-
-    const result = await this.storageManager.generatePresignedUploadUrl({
-      fileName,
-      contentType,
-      fileSize,
-      context,
-      expirationSeconds: 3600,
-      metadata,
-    });
-
-    let downloadUrl: string | undefined;
-    try {
-      downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
-        key: result.key,
-        context,
-        expirationSeconds: 24 * 60 * 60,
-      });
-    } catch {
-      // Ignore download URL generation errors
-    }
-
-    const servePath = this.serveUrlBuilder(result.key, context);
-
-    return {
-      fileName,
-      presignedUrl: result.url,
-      downloadUrl,
-      fileInfo: {
-        // Keep a stable, non-expiring serve path
-        path: servePath,
-        key: result.key,
-        name: fileName,
-        size: fileSize,
-        type: contentType,
-      },
-      uploadHeaders: result.uploadHeaders,
-      directUploadSupported: true,
-    };
   }
 
   async handleBatchPresigned(
@@ -300,78 +390,91 @@ export class FileRouteHandler {
     const { files, type } = input;
     const context = this.getContext(type);
 
-    // Validate all files first
-    for (const file of files) {
-      if (file.fileSize > this.maxFileSize) {
-        throw new Error(`File ${file.fileName} exceeds maximum size`);
-      }
-      if (context === "knowledge-base") {
-        const typeError = validateFileType(file.fileName, file.contentType);
-        if (typeError) {
-          throw new Error(typeError.message);
+    try {
+      for (const file of files) {
+        if (file.fileSize > this.maxFileSize) {
+          throw new UploadError(
+            "FILE_TOO_LARGE",
+            `File ${file.fileName} exceeds maximum size`,
+            { maxSize: this.maxFileSize, size: file.fileSize },
+          );
+        }
+        if (context === "knowledge-base") {
+          const typeError = validateFileType(file.fileName, file.contentType);
+          if (typeError) {
+            throw new UploadError(
+              typeError.code,
+              typeError.message,
+              { supportedTypes: typeError.supportedTypes },
+            );
+          }
         }
       }
-    }
 
-    if (!this.storageManager.supportsPresignedUrls(context)) {
-      return {
-        files: files.map((file) => ({
-          fileName: file.fileName,
-          presignedUrl: "",
-          fileInfo: {
-            path: "",
-            key: "",
-            name: file.fileName,
-            size: file.fileSize,
-            type: file.contentType,
-          },
-          directUploadSupported: false,
-        })),
-        directUploadSupported: false,
-      };
-    }
-
-    const results = await Promise.all(
-      files.map((file) =>
-        this.storageManager.generatePresignedUploadUrl({
-          fileName: file.fileName,
-          contentType: file.contentType,
-          fileSize: file.fileSize,
-          context,
-          expirationSeconds: 3600,
-          metadata,
-        }),
-      ),
-    );
-
-    return {
-      files: results.map((result, index) => {
-        const file = files[index];
-        if (!file) {
-          throw new Error("File index mismatch");
-        }
-
-        const servePath = this.serveUrlBuilder(result.key, context);
-
+      if (!this.storageManager.supportsPresignedUrls(context)) {
         return {
-          fileName: file.fileName,
-          presignedUrl: result.url,
-          // propagate downloadUrl if the provider supports it
-          // (currently only single presign populates downloadUrl)
-          downloadUrl: undefined,
-          fileInfo: {
-            path: servePath,
-            key: result.key,
-            name: file.fileName,
-            size: file.fileSize,
-            type: file.contentType,
-          },
-          uploadHeaders: result.uploadHeaders,
-          directUploadSupported: true,
+          files: files.map((file) => ({
+            fileName: file.fileName,
+            presignedUrl: "",
+            fileInfo: {
+              path: "",
+              key: "",
+              name: file.fileName,
+              size: file.fileSize,
+              type: file.contentType,
+            },
+            directUploadSupported: false,
+          })),
+          directUploadSupported: false,
         };
-      }),
-      directUploadSupported: true,
-    };
+      }
+
+      const results = await Promise.all(
+        files.map((file) =>
+          this.storageManager.generatePresignedUploadUrl({
+            fileName: file.fileName,
+            contentType: file.contentType,
+            fileSize: file.fileSize,
+            context,
+            expirationSeconds: 3600,
+            metadata,
+          }),
+        ),
+      );
+
+      return {
+        files: results.map((result, index) => {
+          const file = files[index];
+          if (!file) {
+            throw new UploadError(
+              "INTERNAL_ERROR",
+              "File index mismatch during batch presign",
+            );
+          }
+
+          const servePath = this.serveUrlBuilder(result.key, context);
+
+          return {
+            fileName: file.fileName,
+            presignedUrl: result.url,
+            downloadUrl: undefined,
+            fileInfo: {
+              path: servePath,
+              key: result.key,
+              name: file.fileName,
+              size: file.fileSize,
+              type: file.contentType,
+            },
+            uploadHeaders: result.uploadHeaders,
+            directUploadSupported: true,
+          };
+        }),
+        directUploadSupported: true,
+      };
+    } catch (error) {
+      await this.emitError(error as Error, context);
+      throw error;
+    }
   }
 
   async handleMultipart(
@@ -385,70 +488,99 @@ export class FileRouteHandler {
   ): Promise<MultipartResponse> {
     const context = this.getContext(data.context);
 
-    if (!this.storageManager.supportsMultipartUpload(context)) {
-      throw new Error(
-        `Provider for ${context} doesn't support multipart upload`,
-      );
-    }
-
-    switch (action) {
-      case "initiate": {
-        const initiateData = data as MultipartInitiateData;
-        const {
-          fileName,
-          contentType,
-          fileSize,
-          metadata: clientMetadata,
-        } = initiateData;
-
-        return this.storageManager.initiateMultipartUpload({
-          fileName,
-          contentType,
-          fileSize,
-          context,
-          metadata: { ...clientMetadata, ...metadata },
-        });
+    try {
+      if (!this.storageManager.supportsMultipartUpload(context)) {
+        throw new UploadError(
+          "PROVIDER_UNSUPPORTED_MULTIPART",
+          `Provider for ${context} doesn't support multipart upload`,
+          { context },
+        );
       }
-      case "get-part-urls": {
-        const urlData = data as MultipartGetPartUrlsData;
-        const { uploadId, key, partNumbers } = urlData;
 
-        const urls = await this.storageManager.getMultipartPartUrls({
-          uploadId,
-          key,
-          partNumbers,
-          context,
-        });
+      switch (action) {
+        case "initiate": {
+          const initiateData = data as MultipartInitiateData;
+          const {
+            fileName,
+            contentType,
+            fileSize,
+            metadata: clientMetadata,
+          } = initiateData;
 
-        return { presignedUrls: urls };
+          const sizeError = validateFileSize(fileSize, this.maxFileSize);
+          if (sizeError) {
+            throw new UploadError(
+              sizeError.code,
+              sizeError.message,
+              { maxSize: this.maxFileSize, size: fileSize },
+            );
+          }
+          if (context === "knowledge-base") {
+            const typeError = validateFileType(fileName, contentType);
+            if (typeError) {
+              throw new UploadError(
+                typeError.code,
+                typeError.message,
+                { supportedTypes: typeError.supportedTypes },
+              );
+            }
+          }
+
+          return this.storageManager.initiateMultipartUpload({
+            fileName,
+            contentType,
+            fileSize,
+            context,
+            metadata: { ...clientMetadata, ...metadata },
+          });
+        }
+        case "get-part-urls": {
+          const urlData = data as MultipartGetPartUrlsData;
+          const { uploadId, key, partNumbers } = urlData;
+
+          const urls = await this.storageManager.getMultipartPartUrls({
+            uploadId,
+            key,
+            partNumbers,
+            context,
+          });
+
+          return { presignedUrls: urls };
+        }
+        case "complete": {
+          const completeData = data as MultipartCompleteData;
+          const { uploadId, key, parts } = completeData;
+
+          return this.storageManager.completeMultipartUpload({
+            uploadId,
+            key,
+            parts,
+            context,
+          });
+        }
+        case "abort": {
+          const abortData = data as MultipartAbortData;
+          const { uploadId, key } = abortData;
+
+          await this.storageManager.abortMultipartUpload({
+            uploadId,
+            key,
+            context,
+          });
+
+          return { success: true };
+        }
+        default: {
+          const exhaustiveCheck: never = action;
+          throw new UploadError(
+            "INTERNAL_ERROR",
+            `Invalid multipart action: ${exhaustiveCheck}`,
+          );
+        }
       }
-      case "complete": {
-        const completeData = data as MultipartCompleteData;
-        const { uploadId, key, parts } = completeData;
-
-        return this.storageManager.completeMultipartUpload({
-          uploadId,
-          key,
-          parts,
-          context,
-        });
-      }
-      case "abort": {
-        const abortData = data as MultipartAbortData;
-        const { uploadId, key } = abortData;
-
-        await this.storageManager.abortMultipartUpload({
-          uploadId,
-          key,
-          context,
-        });
-
-        return { success: true };
-      }
-      default: {
-        const exhaustiveCheck: never = action;
-        throw new Error(`Invalid multipart action: ${exhaustiveCheck}`);
-      }
+    } catch (error) {
+      await this.emitError(error as Error, context);
+      throw error;
     }
   }
 
@@ -458,72 +590,87 @@ export class FileRouteHandler {
     metadata?: Record<string, string>,
   ): Promise<UploadResponse | { files: UploadResponse[] }> {
     if (!files || files.length === 0) {
-      throw new Error("No files provided");
+      throw new UploadError("NO_FILES", "No files provided");
     }
 
     const context = this.getContext(contextInput);
     const uploadResults: UploadResponse[] = [];
 
-    for (const file of files) {
-      // Validate size
-      const sizeError = validateFileSize(file.size, this.maxFileSize);
-      if (sizeError) {
-        throw new Error(sizeError.message);
-      }
-
-      // Validate type
-      if (context === "knowledge-base") {
-        const typeError = validateFileType(file.name, file.type);
-        if (typeError) {
-          throw new Error(typeError.message);
+    try {
+      for (const file of files) {
+        const sizeError = validateFileSize(file.size, this.maxFileSize);
+        if (sizeError) {
+          throw new UploadError(
+            sizeError.code,
+            sizeError.message,
+            { maxSize: this.maxFileSize, size: file.size, file: file.name },
+          );
         }
-      }
 
-      const fileInfo = await this.storageManager.upload({
-        file: file.buffer,
-        fileName: file.name,
-        contentType: file.type,
-        context,
-        metadata: {
-          uploadSource: "web",
-          ...metadata,
-        },
-      });
-
-      // Generate download URL if supported
-      let downloadUrl: string | undefined;
-      if (this.storageManager.supportsPresignedUrls(context)) {
-        try {
-          downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
-            key: fileInfo.key,
-            context,
-            expirationSeconds: 24 * 60 * 60,
-          });
-        } catch {
-          // Ignore download URL generation errors
+        if (context === "knowledge-base") {
+          const typeError = validateFileType(file.name, file.type);
+          if (typeError) {
+            throw new UploadError(
+              typeError.code,
+              typeError.message,
+              { supportedTypes: typeError.supportedTypes, file: file.name },
+            );
+          }
         }
+
+        await this.runBeforeUpload(file, context);
+
+        const fileInfo = await this.storageManager.upload({
+          file: file.buffer,
+          fileName: file.name,
+          contentType: file.type,
+          context,
+          metadata: {
+            uploadSource: "web",
+            ...metadata,
+          },
+        });
+
+        let downloadUrl: string | undefined;
+        if (this.storageManager.supportsPresignedUrls(context)) {
+          try {
+            downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
+              key: fileInfo.key,
+              context,
+              expirationSeconds: 24 * 60 * 60,
+            });
+          } catch {
+            // Ignore download URL generation errors
+          }
+        }
+
+        const servePath = this.serveUrlBuilder(fileInfo.key, context);
+
+        const uploadResult: UploadResponse = {
+          id: fileInfo.key,
+          name: file.name,
+          size: file.buffer.length,
+          type: file.type,
+          key: fileInfo.key,
+          path: servePath,
+          url: downloadUrl || servePath,
+          downloadUrl,
+          uploadedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          context,
+        };
+
+        uploadResults.push(uploadResult);
+        await this.runAfterUpload(uploadResult, context);
       }
 
-      const servePath = this.serveUrlBuilder(fileInfo.key, context);
-
-      uploadResults.push({
-        id: fileInfo.key,
-        name: file.name,
-        size: file.buffer.length,
-        type: file.type,
-        key: fileInfo.key,
-        path: servePath,
-        url: downloadUrl || servePath,
-        downloadUrl,
-        uploadedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        context,
-      });
+      return uploadResults.length === 1
+        ? uploadResults[0]
+        : { files: uploadResults };
+    } catch (error) {
+      await this.emitError(error as Error, context);
+      throw error;
     }
-
-    return uploadResults.length === 1
-      ? uploadResults[0]
-      : { files: uploadResults };
   }
 
   async handleServe(
@@ -531,17 +678,38 @@ export class FileRouteHandler {
     contextInput?: string,
   ): Promise<ServeResponse> {
     if (!key) {
-      throw new Error("No file key provided");
+      throw new UploadError("MISSING_KEY", "No file key provided");
     }
     const context = this.getContext(contextInput);
 
-    const fileBuffer = await this.storageManager.download({ key, context });
-    const filename = key.split("/").pop() || "download";
+    try {
+      const fileBuffer = await this.storageManager.download({ key, context });
+      const filename = sanitizeFilename(key.split("/").pop() || "download");
 
-    return {
-      fileBuffer,
-      filename,
-      context,
-    };
+      return {
+        fileBuffer,
+        filename,
+        context,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "File could not be served";
+      const status =
+        message.toLowerCase().includes("not found") ||
+        message.toLowerCase().includes("missing")
+          ? 404
+          : 500;
+      const uploadError =
+        error instanceof UploadError
+          ? error
+          : new UploadError(
+              status === 404 ? "NOT_FOUND" : "INTERNAL_ERROR",
+              message,
+              { key, context },
+              status,
+            );
+      await this.emitError(uploadError, context);
+      throw uploadError;
+    }
   }
 }

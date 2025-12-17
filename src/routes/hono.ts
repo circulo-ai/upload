@@ -1,7 +1,9 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { getContentType } from "../utils/validation";
 import { FileRouteHandler, type FileHandlerConfig } from "./handler";
+import { UploadError } from "../utils/errors";
 
 export type { FileHandlerConfig } from "./handler";
 
@@ -70,6 +72,9 @@ export function createHonoFileRoutes<E extends Env = Env>(
   const getMiddleware = (key: RouteKey): MiddlewareHandler<E>[] =>
     options.routes?.[key]?.middleware ?? [];
 
+  const toStatus = (status?: number): ContentfulStatusCode =>
+    Math.min(599, Math.max(200, status ?? 500)) as ContentfulStatusCode;
+
   // DELETE
   if (isEnabled("delete")) {
     router.post("/delete", ...getMiddleware("delete"), async (c) => {
@@ -80,6 +85,13 @@ export function createHonoFileRoutes<E extends Env = Env>(
         const result = await handler.handleDelete(key, context);
         return c.json(result);
       } catch (error) {
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
+        }
         return c.json(
           { error: error instanceof Error ? error.message : "Delete failed" },
           500,
@@ -105,7 +117,14 @@ export function createHonoFileRoutes<E extends Env = Env>(
         return c.json(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
-          return c.json({ error: error.flatten() }, 400);
+          return c.json({ error: z.treeifyError(error) }, 400);
+        }
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
         }
         return c.json(
           {
@@ -141,7 +160,14 @@ export function createHonoFileRoutes<E extends Env = Env>(
         return c.json(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
-          return c.json({ error: error.flatten() }, 400);
+          return c.json({ error: z.treeifyError(error) }, 400);
+        }
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
         }
         if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
@@ -187,7 +213,14 @@ export function createHonoFileRoutes<E extends Env = Env>(
           return c.json(result);
         } catch (error) {
           if (error instanceof z.ZodError) {
-            return c.json({ error: error.flatten() }, 400);
+            return c.json({ error: z.treeifyError(error) }, 400);
+          }
+          if (error instanceof UploadError) {
+            const status = toStatus(error.status);
+            return c.json(
+              { error: error.message, code: error.code, details: error.details },
+              status,
+            );
           }
           if (error instanceof Error && error.message === "Unauthorized") {
             return c.json({ error: "Unauthorized" }, 401);
@@ -312,13 +345,20 @@ export function createHonoFileRoutes<E extends Env = Env>(
             return c.json(result);
           }
         }
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          return c.json({ error: error.flatten() }, 400);
-        }
-        if (error instanceof Error && error.message === "Unauthorized") {
-          return c.json({ error: "Unauthorized" }, 401);
-        }
+        } catch (error) {
+          if (error instanceof z.ZodError) {
+            return c.json({ error: z.treeifyError(error) }, 400);
+          }
+          if (error instanceof UploadError) {
+            const status = toStatus(error.status);
+            return c.json(
+              { error: error.message, code: error.code, details: error.details },
+              status,
+            );
+          }
+          if (error instanceof Error && error.message === "Unauthorized") {
+            return c.json({ error: "Unauthorized" }, 401);
+          }
         return c.json(
           {
             error:
@@ -369,6 +409,13 @@ export function createHonoFileRoutes<E extends Env = Env>(
         );
         return c.json(result);
       } catch (error) {
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
+        }
         if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
         }
@@ -390,6 +437,26 @@ export function createHonoFileRoutes<E extends Env = Env>(
         const rawKey = idx >= 0 ? path.slice(idx + "/serve/".length) : "";
         const key = decodeURIComponent(rawKey);
         const context = c.req.query("context") ?? undefined;
+        const method = c.req.method;
+
+        if (method === "HEAD") {
+          try {
+            const downloadInfo = await handler.handleDownload(
+              key,
+              undefined,
+              context,
+            );
+
+            if (downloadInfo.expiresIn !== null && downloadInfo.downloadUrl) {
+              return new Response(null, {
+                status: 307,
+                headers: { Location: downloadInfo.downloadUrl },
+              });
+            }
+          } catch {
+            // Fall through to direct serve if presign fails
+          }
+        }
 
         const { fileBuffer, filename } = await handler.handleServe(
           key,
@@ -399,16 +466,26 @@ export function createHonoFileRoutes<E extends Env = Env>(
         const contentType =
           getContentType(filename) ?? "application/octet-stream";
 
-        return new Response(fileBuffer, {
+        return new Response(method === "HEAD" ? null : fileBuffer, {
           status: 200,
           headers: {
             "Content-Type": contentType,
             "Content-Disposition": `inline; filename="${filename}"`,
             "Cache-Control": "public, max-age=31536000",
             "X-Content-Type-Options": "nosniff",
+            ...(method === "HEAD"
+              ? { "Content-Length": fileBuffer.byteLength.toString() }
+              : {}),
           },
         });
       } catch (error) {
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
+        }
         return c.json(
           { error: error instanceof Error ? error.message : "File not found" },
           404,

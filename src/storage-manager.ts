@@ -144,6 +144,13 @@ export class StorageManager<TContexts extends string = string> {
   }
 
   /**
+   * Get the manager's configured default context
+   */
+  getDefaultContext(): TContexts {
+    return this.config.defaultContext;
+  }
+
+  /**
    * Check if a context exists
    */
   hasContext(context: TContexts): boolean {

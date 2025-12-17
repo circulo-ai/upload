@@ -46,6 +46,10 @@ export {
   type LocalStorageConfig,
 } from "./providers/local";
 export { S3StorageProvider, type S3Config } from "./providers/s3";
+export {
+  VercelBlobStorageProvider,
+  type VercelBlobConfig,
+} from "./providers/vercel-blob";
 
 // Storage manager
 export {
@@ -72,6 +76,7 @@ export {
   type DownloadRequest,
   type DownloadResponse,
   type FileHandlerConfig,
+  type FileHandlerHooks,
   type MultipartAbortData,
   type MultipartAbortResponse,
   type MultipartCompleteData,
@@ -107,3 +112,4 @@ export {
   isValidUrl,
   sanitizeFilename,
 } from "./utils/security";
+export { UploadError, type UploadErrorCode } from "./utils/errors";
