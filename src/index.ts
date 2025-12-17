@@ -77,6 +77,7 @@ export {
   type DownloadResponse,
   type FileHandlerConfig,
   type FileHandlerHooks,
+  type FileValidationInput,
   type MultipartAbortData,
   type MultipartAbortResponse,
   type MultipartCompleteData,

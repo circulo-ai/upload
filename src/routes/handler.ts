@@ -1,22 +1,36 @@
 import type { StorageManager } from "../storage-manager";
 import type {
+  FileValidationError,
   MultipartCompleteResponse,
   MultipartInitResponse,
 } from "../types/core";
 import { MAX_FILE_SIZE } from "../types/core";
 import { UploadError } from "../utils/errors";
 import { sanitizeFilename } from "../utils/security";
-import { validateFileSize, validateFileType } from "../utils/validation";
+import { validateFileSize } from "../utils/validation";
 
 export interface FileHandlerConfig {
   storageManager: StorageManager;
   maxFileSize?: number;
+  /**
+   * Optional type/MIME validation hook.
+   * Return a FileValidationError or UploadError to block the request, or null to allow.
+   */
+  validateFile?: (input: FileValidationInput) => FileValidationError | UploadError | null;
   /**
    * Callback to generate serve/download URL for a key.
    * Defaults to: "/api/files/serve/" + encodeURIComponent(key)
    */
   serveUrlBuilder?: (key: string, context: string) => string;
   hooks?: FileHandlerHooks;
+}
+
+export interface FileValidationInput {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  context: string;
+  phase: "presign" | "batch-presign" | "multipart-init" | "upload";
 }
 
 export interface FileHandlerHooks {
@@ -165,12 +179,14 @@ export interface ServeResponse {
 export class FileRouteHandler {
   private storageManager: StorageManager;
   private maxFileSize: number;
+  private validateFileFn?: FileHandlerConfig["validateFile"];
   private serveUrlBuilder: (key: string, context: string) => string;
   private hooks?: FileHandlerHooks;
 
   constructor(config: FileHandlerConfig) {
     this.storageManager = config.storageManager;
     this.maxFileSize = config.maxFileSize || MAX_FILE_SIZE;
+    this.validateFileFn = config.validateFile;
     this.hooks = config.hooks;
     this.serveUrlBuilder =
       config.serveUrlBuilder ||
@@ -187,6 +203,20 @@ export class FileRouteHandler {
     } catch {
       // Swallow hook errors to avoid masking primary failures
     }
+  }
+
+  private runTypeValidation(input: FileValidationInput): void {
+    if (!this.validateFileFn) return;
+    const result = this.validateFileFn(input);
+    if (!result) return;
+    if (result instanceof UploadError) {
+      throw result;
+    }
+    throw new UploadError(
+      result.code,
+      result.message,
+      { supportedTypes: result.supportedTypes },
+    );
   }
 
   private async runBeforeUpload(
@@ -314,17 +344,13 @@ export class FileRouteHandler {
         );
       }
 
-      if (context === "knowledge-base") {
-        const typeError = validateFileType(fileName, contentType);
-        if (typeError) {
-          throw new UploadError(
-            typeError.code,
-            typeError.message,
-            { supportedTypes: typeError.supportedTypes },
-            400,
-          );
-        }
-      }
+      this.runTypeValidation({
+        fileName,
+        contentType,
+        fileSize,
+        context,
+        phase: "presign",
+      });
 
       if (!this.storageManager.supportsPresignedUrls(context)) {
         return {
@@ -399,16 +425,13 @@ export class FileRouteHandler {
             { maxSize: this.maxFileSize, size: file.fileSize },
           );
         }
-        if (context === "knowledge-base") {
-          const typeError = validateFileType(file.fileName, file.contentType);
-          if (typeError) {
-            throw new UploadError(
-              typeError.code,
-              typeError.message,
-              { supportedTypes: typeError.supportedTypes },
-            );
-          }
-        }
+        this.runTypeValidation({
+          fileName: file.fileName,
+          contentType: file.contentType,
+          fileSize: file.fileSize,
+          context,
+          phase: "batch-presign",
+        });
       }
 
       if (!this.storageManager.supportsPresignedUrls(context)) {
@@ -515,16 +538,13 @@ export class FileRouteHandler {
               { maxSize: this.maxFileSize, size: fileSize },
             );
           }
-          if (context === "knowledge-base") {
-            const typeError = validateFileType(fileName, contentType);
-            if (typeError) {
-              throw new UploadError(
-                typeError.code,
-                typeError.message,
-                { supportedTypes: typeError.supportedTypes },
-              );
-            }
-          }
+          this.runTypeValidation({
+            fileName,
+            contentType,
+            fileSize,
+            context,
+            phase: "multipart-init",
+          });
 
           return this.storageManager.initiateMultipartUpload({
             fileName,
@@ -607,16 +627,13 @@ export class FileRouteHandler {
           );
         }
 
-        if (context === "knowledge-base") {
-          const typeError = validateFileType(file.name, file.type);
-          if (typeError) {
-            throw new UploadError(
-              typeError.code,
-              typeError.message,
-              { supportedTypes: typeError.supportedTypes, file: file.name },
-            );
-          }
-        }
+        this.runTypeValidation({
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
+          context,
+          phase: "upload",
+        });
 
         await this.runBeforeUpload(file, context);
 

@@ -1,9 +1,12 @@
 # @circulo-ai/upload
 
-Universal file upload library with support for AWS S3, Azure Blob Storage, Vercel Blob, and local file system.
+A type-safe, multi-provider file upload framework for Node.js and Next.js,
+with first-class support for presigned URLs and multipart uploads.
 
 ## Features
 
+- 🧠 **Type-safe storage contexts**: compile-time safety when routing files
+  across multiple buckets, containers, or backends.
 - 🌐 **Multi-provider support**: AWS S3, Azure Blob, Local storage, Vercel Blob
 - 🪣 **Multi-bucket/container**: Organize files across different storage contexts
 - 📦 **Multipart uploads**: Large file support with resumable uploads
@@ -23,6 +26,20 @@ npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner    # For S3
 npm install @azure/storage-blob                                 # For Azure Blob
 # Local storage has no dependencies
 ```
+
+## Core Concepts
+
+- **StorageProvider**: low-level adapter for one backend (S3, Azure Blob, Vercel Blob, Local). Use directly for single-bucket/simple cases.
+- **StorageManager** (recommended): orchestrates multiple named providers/contexts (e.g., `uploads`, `public`, `temp`) with shared helpers (presign, multipart) and type-safe context selection.
+- **Route adapters**: `@circulo-ai/upload/next` and `@circulo-ai/upload/hono` expose HTTP handlers for uploads, presigned URLs, multipart, and serving files.
+
+### Environment Compatibility
+
+| Surface                           | Supported | Notes                                                                   |
+| --------------------------------- | --------- | ----------------------------------------------------------------------- |
+| Node.js (server)                  | ✅        | Primary target                                                          |
+| Edge runtimes (Vercel/Cloudflare) | ⚠️        | Depends on provider; Local/S3 presign need Node APIs, Vercel Blob works |
+| Browser                           | ⚠️        | Use presigned URLs or route adapters; providers are server-side only    |
 
 ## Quick Start
 
@@ -305,9 +322,12 @@ import { FileRouteHandler } from "@circulo-ai/upload";
 const handler = new FileRouteHandler({
   storageManager: manager,
   hooks: {
-    beforeUpload: (file, context) => console.log("uploading", file.name, context),
-    afterUpload: (upload, context) => console.log("uploaded", upload.key, context),
-    onError: (error, context) => console.error("upload error", { error, context }),
+    beforeUpload: (file, context) =>
+      console.log("uploading", file.name, context),
+    afterUpload: (upload, context) =>
+      console.log("uploaded", upload.key, context),
+    onError: (error, context) =>
+      console.error("upload error", { error, context }),
   },
 });
 ```
@@ -315,8 +335,71 @@ const handler = new FileRouteHandler({
 Errors are instances of `UploadError` (also exported) and the HTTP responses from `createNextFileHandler` / `createHonoFileRoutes` are shaped like:
 
 ```json
-{ "error": "File size ...", "code": "FILE_TOO_LARGE", "details": { "maxSize": 104857600 } }
+{
+  "error": "File size ...",
+  "code": "FILE_TOO_LARGE",
+  "details": { "maxSize": 104857600 }
+}
 ```
+
+### Browser → API → Storage flow (presigned example)
+
+```typescript
+// client (browser)
+async function uploadFile(file: File) {
+  const presign = await fetch("/api/files/presigned", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type,
+      fileSize: file.size,
+    }),
+  }).then((r) => r.json());
+
+  await fetch(presign.presignedUrl, {
+    method: "PUT",
+    headers: presign.uploadHeaders,
+    body: file,
+  });
+
+  return presign.fileInfo; // contains stable serve path + key
+}
+```
+
+### Custom file validation
+
+Use the `validateFile` hook on `FileRouteHandler` to enforce your own rules. Return `null` to allow, or a `FileValidationError`/`UploadError` to block.
+
+```typescript
+import { FileRouteHandler, UploadError } from "@circulo-ai/upload";
+
+const handler = new FileRouteHandler({
+  storageManager: manager,
+  validateFile: ({ fileName, contentType, fileSize, context, phase }) => {
+    if (fileSize > 50 * 1024 * 1024) {
+      return new UploadError("FILE_TOO_LARGE", "Max 50MB");
+    }
+    if (context === "avatars" && !contentType.startsWith("image/")) {
+      return {
+        code: "UNSUPPORTED_FILE_TYPE",
+        message: "Only images are allowed for avatars",
+        supportedTypes: ["image/jpeg", "image/png", "image/webp"],
+      };
+    }
+    return null;
+  },
+});
+```
+
+### Security & Safety
+
+- **Max size**: default 100 MB (`MAX_FILE_SIZE`), enforced for uploads/presigns/multipart.
+- **Type checks**: optional MIME/extension validation (not content sniffing)
+- **Path traversal**: Local provider sanitizes keys and enforces base directory boundaries.
+- **Header hygiene**: Filenames sanitized before `Content-Disposition`; metadata sanitized per provider.
+- **Public vs private**: Presigned URLs give time-limited access; Local fallback uses server-side `serve` route.
+- **Hooks**: Use `onError`/`beforeUpload` to log/audit/deny suspicious uploads.
 
 ### Validation Utilities
 
@@ -417,6 +500,12 @@ const minio = new S3StorageProvider({
   },
 });
 ```
+
+## When This May Not Be a Fit
+
+- You only need a simple `<input type="file">` + form POST
+- You want a hosted upload widget / UI
+- You need built-in virus scanning or media processing
 
 ## License
 
