@@ -1,9 +1,9 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { UploadError } from "../utils/errors";
 import { getContentType } from "../utils/validation";
 import { FileRouteHandler, type FileHandlerConfig } from "./handler";
-import { UploadError } from "../utils/errors";
 
 export type { FileHandlerConfig } from "./handler";
 
@@ -218,7 +218,11 @@ export function createHonoFileRoutes<E extends Env = Env>(
           if (error instanceof UploadError) {
             const status = toStatus(error.status);
             return c.json(
-              { error: error.message, code: error.code, details: error.details },
+              {
+                error: error.message,
+                code: error.code,
+                details: error.details,
+              },
               status,
             );
           }
@@ -345,20 +349,20 @@ export function createHonoFileRoutes<E extends Env = Env>(
             return c.json(result);
           }
         }
-        } catch (error) {
-          if (error instanceof z.ZodError) {
-            return c.json({ error: z.treeifyError(error) }, 400);
-          }
-          if (error instanceof UploadError) {
-            const status = toStatus(error.status);
-            return c.json(
-              { error: error.message, code: error.code, details: error.details },
-              status,
-            );
-          }
-          if (error instanceof Error && error.message === "Unauthorized") {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: z.treeifyError(error) }, 400);
+        }
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            status,
+          );
+        }
+        if (error instanceof Error && error.message === "Unauthorized") {
+          return c.json({ error: "Unauthorized" }, 401);
+        }
         return c.json(
           {
             error:

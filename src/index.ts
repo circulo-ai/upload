@@ -107,10 +107,10 @@ export {
   validateFileType,
 } from "./utils/validation";
 
+export { UploadError, type UploadErrorCode } from "./utils/errors";
 export {
   base64ToBuffer,
   bufferToBase64,
   isValidUrl,
   sanitizeFilename,
 } from "./utils/security";
-export { UploadError, type UploadErrorCode } from "./utils/errors";

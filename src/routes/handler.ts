@@ -16,7 +16,9 @@ export interface FileHandlerConfig {
    * Optional type/MIME validation hook.
    * Return a FileValidationError or UploadError to block the request, or null to allow.
    */
-  validateFile?: (input: FileValidationInput) => FileValidationError | UploadError | null;
+  validateFile?: (
+    input: FileValidationInput,
+  ) => FileValidationError | UploadError | null;
   /**
    * Callback to generate serve/download URL for a key.
    * Defaults to: "/api/files/serve/" + encodeURIComponent(key)
@@ -212,11 +214,9 @@ export class FileRouteHandler {
     if (result instanceof UploadError) {
       throw result;
     }
-    throw new UploadError(
-      result.code,
-      result.message,
-      { supportedTypes: result.supportedTypes },
-    );
+    throw new UploadError(result.code, result.message, {
+      supportedTypes: result.supportedTypes,
+    });
   }
 
   private async runBeforeUpload(
@@ -532,11 +532,10 @@ export class FileRouteHandler {
 
           const sizeError = validateFileSize(fileSize, this.maxFileSize);
           if (sizeError) {
-            throw new UploadError(
-              sizeError.code,
-              sizeError.message,
-              { maxSize: this.maxFileSize, size: fileSize },
-            );
+            throw new UploadError(sizeError.code, sizeError.message, {
+              maxSize: this.maxFileSize,
+              size: fileSize,
+            });
           }
           this.runTypeValidation({
             fileName,
@@ -620,11 +619,11 @@ export class FileRouteHandler {
       for (const file of files) {
         const sizeError = validateFileSize(file.size, this.maxFileSize);
         if (sizeError) {
-          throw new UploadError(
-            sizeError.code,
-            sizeError.message,
-            { maxSize: this.maxFileSize, size: file.size, file: file.name },
-          );
+          throw new UploadError(sizeError.code, sizeError.message, {
+            maxSize: this.maxFileSize,
+            size: file.size,
+            file: file.name,
+          });
         }
 
         this.runTypeValidation({
@@ -651,11 +650,12 @@ export class FileRouteHandler {
         let downloadUrl: string | undefined;
         if (this.storageManager.supportsPresignedUrls(context)) {
           try {
-            downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
-              key: fileInfo.key,
-              context,
-              expirationSeconds: 24 * 60 * 60,
-            });
+            downloadUrl =
+              await this.storageManager.generatePresignedDownloadUrl({
+                key: fileInfo.key,
+                context,
+                expirationSeconds: 24 * 60 * 60,
+              });
           } catch {
             // Ignore download URL generation errors
           }

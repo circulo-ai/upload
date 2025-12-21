@@ -1,11 +1,11 @@
 import { z } from "zod";
+import { UploadError } from "../utils/errors";
 import { getContentType } from "../utils/validation";
 import {
   FileRouteHandler,
   type FileHandlerConfig,
   type UploadFile,
 } from "./handler";
-import { UploadError } from "../utils/errors";
 
 type RouteKey =
   | "delete"
