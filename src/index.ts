@@ -63,7 +63,10 @@ export {
   type ContextualPresignedDownloadUrlOptions,
   type ContextualPresignedUploadUrlOptions,
   type ContextualUploadOptions,
+  type StorageManagerFactory,
   type StorageManagerConfig,
+  type StorageManagerProviders,
+  type StorageProviderFactory,
 } from "./storage-manager";
 
 // Route handler

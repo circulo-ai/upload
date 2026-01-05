@@ -448,6 +448,24 @@ export const GET = handler;
 export const POST = handler;
 ```
 
+If you need to delay initialization (for example, to avoid missing env values during `next build`),
+pass factories instead of concrete instances:
+
+```typescript
+const handler = createNextFileHandler({
+  storageManager: () =>
+    new StorageManager({
+      providers: {
+        uploads: () => new LocalStorageProvider({ basePath: "./uploads" }),
+      },
+      defaultContext: "uploads",
+    }),
+});
+
+export const GET = handler;
+export const POST = handler;
+```
+
 Available paths under that route:
 
 - `POST /delete` – delete by key (JSON: `{ key, context? }`)

@@ -1,4 +1,7 @@
-import type { StorageManager } from "../storage-manager";
+import type {
+  StorageManager,
+  StorageManagerFactory,
+} from "../storage-manager";
 import type {
   FileValidationError,
   MultipartCompleteResponse,
@@ -10,7 +13,10 @@ import { sanitizeFilename } from "../utils/security";
 import { validateFileSize } from "../utils/validation";
 
 export interface FileHandlerConfig {
-  storageManager: StorageManager;
+  /**
+   * Pass a factory to defer initialization until the first request.
+   */
+  storageManager: StorageManager | StorageManagerFactory;
   maxFileSize?: number;
   /**
    * Optional type/MIME validation hook.
@@ -179,7 +185,7 @@ export interface ServeResponse {
 }
 
 export class FileRouteHandler {
-  private storageManager: StorageManager;
+  private storageManager: StorageManager | StorageManagerFactory;
   private maxFileSize: number;
   private validateFileFn?: FileHandlerConfig["validateFile"];
   private serveUrlBuilder: (key: string, context: string) => string;
@@ -196,6 +202,16 @@ export class FileRouteHandler {
         `/api/files/serve/${encodeURIComponent(key)}${
           context ? `?context=${encodeURIComponent(context)}` : ""
         }`);
+  }
+
+  private resolveStorageManager(): StorageManager {
+    if (typeof this.storageManager === "function") {
+      const manager = this.storageManager();
+      this.storageManager = manager;
+      return manager;
+    }
+
+    return this.storageManager;
   }
 
   private async emitError(error: Error, context?: string): Promise<void> {
@@ -237,12 +253,15 @@ export class FileRouteHandler {
     }
   }
 
-  private getContext(contextInput?: string): string {
+  private getContext(
+    contextInput?: string,
+    storageManager: StorageManager = this.resolveStorageManager(),
+  ): string {
     if (!contextInput) {
-      return this.storageManager.getDefaultContext();
+      return storageManager.getDefaultContext();
     }
 
-    if (this.storageManager.hasContext(contextInput)) {
+    if (storageManager.hasContext(contextInput)) {
       return contextInput;
     }
 
@@ -261,9 +280,10 @@ export class FileRouteHandler {
       throw new UploadError("MISSING_KEY", "File key is required");
     }
 
-    const context = this.getContext(contextInput);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(contextInput, storageManager);
     try {
-      await this.storageManager.delete({ key, context });
+      await storageManager.delete({ key, context });
     } catch (error) {
       await this.emitError(error as Error, context);
       throw error;
@@ -277,14 +297,15 @@ export class FileRouteHandler {
     name?: string,
     contextInput?: string,
   ): Promise<DownloadResponse> {
-    const context = this.getContext(contextInput);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(contextInput, storageManager);
     const rawName = name || key.split("/").pop() || "download";
     const fileName = sanitizeFilename(rawName);
 
     try {
-      if (this.storageManager.supportsPresignedUrls(context)) {
+      if (storageManager.supportsPresignedUrls(context)) {
         const downloadUrl =
-          await this.storageManager.generatePresignedDownloadUrl({
+          await storageManager.generatePresignedDownloadUrl({
             key,
             context,
             expirationSeconds: 5 * 60,
@@ -331,7 +352,8 @@ export class FileRouteHandler {
     metadata?: Record<string, string>,
   ): Promise<PresignedResponse> {
     const { fileName, contentType, fileSize, context: contextInput } = input;
-    const context = this.getContext(contextInput);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(contextInput, storageManager);
 
     try {
       const sizeError = validateFileSize(fileSize, this.maxFileSize);
@@ -352,7 +374,7 @@ export class FileRouteHandler {
         phase: "presign",
       });
 
-      if (!this.storageManager.supportsPresignedUrls(context)) {
+      if (!storageManager.supportsPresignedUrls(context)) {
         return {
           fileName,
           presignedUrl: "",
@@ -367,7 +389,7 @@ export class FileRouteHandler {
         };
       }
 
-      const result = await this.storageManager.generatePresignedUploadUrl({
+      const result = await storageManager.generatePresignedUploadUrl({
         fileName,
         contentType,
         fileSize,
@@ -378,7 +400,7 @@ export class FileRouteHandler {
 
       let downloadUrl: string | undefined;
       try {
-        downloadUrl = await this.storageManager.generatePresignedDownloadUrl({
+        downloadUrl = await storageManager.generatePresignedDownloadUrl({
           key: result.key,
           context,
           expirationSeconds: 24 * 60 * 60,
@@ -414,7 +436,8 @@ export class FileRouteHandler {
     metadata?: Record<string, string>,
   ): Promise<BatchPresignedResponse> {
     const { files, type } = input;
-    const context = this.getContext(type);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(type, storageManager);
 
     try {
       for (const file of files) {
@@ -434,7 +457,7 @@ export class FileRouteHandler {
         });
       }
 
-      if (!this.storageManager.supportsPresignedUrls(context)) {
+      if (!storageManager.supportsPresignedUrls(context)) {
         return {
           files: files.map((file) => ({
             fileName: file.fileName,
@@ -454,7 +477,7 @@ export class FileRouteHandler {
 
       const results = await Promise.all(
         files.map((file) =>
-          this.storageManager.generatePresignedUploadUrl({
+          storageManager.generatePresignedUploadUrl({
             fileName: file.fileName,
             contentType: file.contentType,
             fileSize: file.fileSize,
@@ -509,10 +532,11 @@ export class FileRouteHandler {
       | MultipartAbortData,
     metadata?: Record<string, string>,
   ): Promise<MultipartResponse> {
-    const context = this.getContext(data.context);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(data.context, storageManager);
 
     try {
-      if (!this.storageManager.supportsMultipartUpload(context)) {
+      if (!storageManager.supportsMultipartUpload(context)) {
         throw new UploadError(
           "PROVIDER_UNSUPPORTED_MULTIPART",
           `Provider for ${context} doesn't support multipart upload`,
@@ -545,7 +569,7 @@ export class FileRouteHandler {
             phase: "multipart-init",
           });
 
-          return this.storageManager.initiateMultipartUpload({
+          return storageManager.initiateMultipartUpload({
             fileName,
             contentType,
             fileSize,
@@ -557,7 +581,7 @@ export class FileRouteHandler {
           const urlData = data as MultipartGetPartUrlsData;
           const { uploadId, key, partNumbers } = urlData;
 
-          const urls = await this.storageManager.getMultipartPartUrls({
+          const urls = await storageManager.getMultipartPartUrls({
             uploadId,
             key,
             partNumbers,
@@ -570,7 +594,7 @@ export class FileRouteHandler {
           const completeData = data as MultipartCompleteData;
           const { uploadId, key, parts } = completeData;
 
-          return this.storageManager.completeMultipartUpload({
+          return storageManager.completeMultipartUpload({
             uploadId,
             key,
             parts,
@@ -581,7 +605,7 @@ export class FileRouteHandler {
           const abortData = data as MultipartAbortData;
           const { uploadId, key } = abortData;
 
-          await this.storageManager.abortMultipartUpload({
+          await storageManager.abortMultipartUpload({
             uploadId,
             key,
             context,
@@ -612,7 +636,8 @@ export class FileRouteHandler {
       throw new UploadError("NO_FILES", "No files provided");
     }
 
-    const context = this.getContext(contextInput);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(contextInput, storageManager);
     const uploadResults: UploadResponse[] = [];
 
     try {
@@ -636,7 +661,7 @@ export class FileRouteHandler {
 
         await this.runBeforeUpload(file, context);
 
-        const fileInfo = await this.storageManager.upload({
+        const fileInfo = await storageManager.upload({
           file: file.buffer,
           fileName: file.name,
           contentType: file.type,
@@ -648,10 +673,10 @@ export class FileRouteHandler {
         });
 
         let downloadUrl: string | undefined;
-        if (this.storageManager.supportsPresignedUrls(context)) {
+        if (storageManager.supportsPresignedUrls(context)) {
           try {
             downloadUrl =
-              await this.storageManager.generatePresignedDownloadUrl({
+              await storageManager.generatePresignedDownloadUrl({
                 key: fileInfo.key,
                 context,
                 expirationSeconds: 24 * 60 * 60,
@@ -697,10 +722,11 @@ export class FileRouteHandler {
     if (!key) {
       throw new UploadError("MISSING_KEY", "No file key provided");
     }
-    const context = this.getContext(contextInput);
+    const storageManager = this.resolveStorageManager();
+    const context = this.getContext(contextInput, storageManager);
 
     try {
-      const fileBuffer = await this.storageManager.download({ key, context });
+      const fileBuffer = await storageManager.download({ key, context });
       const filename = sanitizeFilename(key.split("/").pop() || "download");
 
       return {
