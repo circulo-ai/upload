@@ -54,12 +54,29 @@ type UploadFile = {
   size: number;
 };
 
+type RouteHandler<E extends Env> = (
+  c: Context<E, string>,
+  next: () => Promise<void>,
+) => Response | Promise<Response | void> | void;
+
+interface RouteRegistrar<E extends Env> {
+  post(path: string, ...handlers: RouteHandler<E>[]): void;
+  get(path: string, ...handlers: RouteHandler<E>[]): void;
+}
+
 export function createHonoFileRoutes<E extends Env = Env>(
   config: FileHandlerConfig,
   options: HonoFileRoutesOptions<E> = {},
 ) {
   const handler = new FileRouteHandler(config);
   const router = new Hono<E>();
+  const registrar = router as unknown as RouteRegistrar<E>;
+  const post = (path: string, ...handlers: RouteHandler<E>[]): void => {
+    registrar.post(path, ...handlers);
+  };
+  const get = (path: string, ...handlers: RouteHandler<E>[]): void => {
+    registrar.get(path, ...handlers);
+  };
 
   const getMetadata = async (c: Context<E>): Promise<Record<string, string>> =>
     options.getUploadMetadata ? await options.getUploadMetadata(c) : {};
@@ -77,7 +94,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
   // DELETE
   if (isEnabled("delete")) {
-    router.post("/delete", ...getMiddleware("delete"), async (c) => {
+    post("/delete", ...getMiddleware("delete"), async (c) => {
       try {
         const body = await c.req.json<{ key: string; context?: string }>();
         const { key, context } = body;
@@ -108,7 +125,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
       context: z.string().optional(),
     });
 
-    router.post("/download", ...getMiddleware("download"), async (c) => {
+    post("/download", ...getMiddleware("download"), async (c) => {
       try {
         const validated = downloadSchema.parse(await c.req.json());
         const { key, name, context } = validated;
@@ -144,7 +161,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
       fileSize: z.number().positive(),
     });
 
-    router.post("/presigned", ...getMiddleware("presigned"), async (c) => {
+    post("/presigned", ...getMiddleware("presigned"), async (c) => {
       try {
         const metadata = await getMetadata(c);
         const validated = presignedSchema.parse(await c.req.json());
@@ -195,52 +212,48 @@ export function createHonoFileRoutes<E extends Env = Env>(
       files: z.array(batchFileSchema).min(1).max(100),
     });
 
-    router.post(
-      "/presigned/batch",
-      ...getMiddleware("presignedBatch"),
-      async (c) => {
-        try {
-          const metadata = await getMetadata(c);
-          const validated = batchSchema.parse(await c.req.json());
-          const { files } = validated;
+    post("/presigned/batch", ...getMiddleware("presignedBatch"), async (c) => {
+      try {
+        const metadata = await getMetadata(c);
+        const validated = batchSchema.parse(await c.req.json());
+        const { files } = validated;
 
-          const type = c.req.query("type") ?? undefined;
+        const type = c.req.query("type") ?? undefined;
 
-          const result = await handler.handleBatchPresigned(
-            { files, type },
-            metadata,
-          );
-          return c.json(result);
-        } catch (error) {
-          if (error instanceof z.ZodError) {
-            return c.json({ error: z.treeifyError(error) }, 400);
-          }
-          if (error instanceof UploadError) {
-            const status = toStatus(error.status);
-            return c.json(
-              {
-                error: error.message,
-                code: error.code,
-                details: error.details,
-              },
-              status,
-            );
-          }
-          if (error instanceof Error && error.message === "Unauthorized") {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        const result = await handler.handleBatchPresigned(
+          { files, type },
+          metadata,
+        );
+        return c.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return c.json({ error: z.treeifyError(error) }, 400);
+        }
+        if (error instanceof UploadError) {
+          const status = toStatus(error.status);
           return c.json(
             {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Failed to generate batch URLs",
+              error: error.message,
+              code: error.code,
+              details: error.details,
             },
-            500,
+            status,
           );
         }
-      },
-    );
+        if (error instanceof Error && error.message === "Unauthorized") {
+          return c.json({ error: "Unauthorized" }, 401);
+        }
+        return c.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to generate batch URLs",
+          },
+          500,
+        );
+      }
+    });
   }
 
   // MULTIPART
@@ -297,7 +310,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
     ]);
     type MultipartAction = z.infer<typeof multipartActionSchema>;
 
-    router.post("/multipart", ...getMiddleware("multipart"), async (c) => {
+    post("/multipart", ...getMiddleware("multipart"), async (c) => {
       try {
         const metadata = await getMetadata(c);
 
@@ -378,7 +391,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
   // UPLOAD
   if (isEnabled("upload")) {
-    router.post("/upload", ...getMiddleware("upload"), async (c) => {
+    post("/upload", ...getMiddleware("upload"), async (c) => {
       try {
         const metadata = await getMetadata(c);
         const formData = await c.req.parseBody({ all: true });
@@ -433,7 +446,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
   // SERVE
   if (isEnabled("serve")) {
-    router.get("/serve/*", ...getMiddleware("serve"), async (c) => {
+    get("/serve/*", ...getMiddleware("serve"), async (c) => {
       try {
         // Always slice the path to avoid surprises with encoded slashes
         const path = c.req.path;

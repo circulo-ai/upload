@@ -4,10 +4,16 @@
   "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
   "type": "module",
   "private": false,
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhbdev/circulo.git"
+  },
   "files": [
     "dist",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -31,6 +37,9 @@
       "require": "./dist/routes/next.cjs",
       "default": "./dist/routes/next.mjs"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "tsdown --watch",
