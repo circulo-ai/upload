@@ -7,7 +7,7 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mhbdev/circulo.git"
+    "url": "git+https://github.com/circulo-ai/circulo.git"
   },
   "files": [
     "dist",
