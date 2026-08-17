@@ -63,8 +63,8 @@ export {
   type ContextualPresignedDownloadUrlOptions,
   type ContextualPresignedUploadUrlOptions,
   type ContextualUploadOptions,
-  type StorageManagerFactory,
   type StorageManagerConfig,
+  type StorageManagerFactory,
   type StorageManagerProviders,
   type StorageProviderFactory,
 } from "./storage-manager";

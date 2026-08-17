@@ -1,6 +1,6 @@
 {
   "name": "@circulo-ai/upload",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
   "type": "module",
   "private": false,
@@ -42,12 +42,12 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "tsdown --watch",
-    "build": "tsdown",
-    "typecheck": "tsc --noEmit",
+    "dev": "bun ./node_modules/tsdown/dist/run.mjs --watch",
+    "build": "bun ./node_modules/tsdown/dist/run.mjs",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
     "lint": "eslint src",
     "prepublishOnly": "bun run build",
-    "test": "vitest run --passWithNoTests",
+    "test": "bun ./node_modules/vitest/vitest.mjs run --passWithNoTests",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "release": "bun run build && npm publish --access public"

@@ -1,7 +1,4 @@
-import type {
-  StorageManager,
-  StorageManagerFactory,
-} from "../storage-manager";
+import type { StorageManager, StorageManagerFactory } from "../storage-manager";
 import type {
   FileValidationError,
   MultipartCompleteResponse,
@@ -304,12 +301,11 @@ export class FileRouteHandler {
 
     try {
       if (storageManager.supportsPresignedUrls(context)) {
-        const downloadUrl =
-          await storageManager.generatePresignedDownloadUrl({
-            key,
-            context,
-            expirationSeconds: 5 * 60,
-          });
+        const downloadUrl = await storageManager.generatePresignedDownloadUrl({
+          key,
+          context,
+          expirationSeconds: 5 * 60,
+        });
 
         return {
           downloadUrl,
@@ -675,12 +671,11 @@ export class FileRouteHandler {
         let downloadUrl: string | undefined;
         if (storageManager.supportsPresignedUrls(context)) {
           try {
-            downloadUrl =
-              await storageManager.generatePresignedDownloadUrl({
-                key: fileInfo.key,
-                context,
-                expirationSeconds: 24 * 60 * 60,
-              });
+            downloadUrl = await storageManager.generatePresignedDownloadUrl({
+              key: fileInfo.key,
+              context,
+              expirationSeconds: 24 * 60 * 60,
+            });
           } catch {
             // Ignore download URL generation errors
           }
