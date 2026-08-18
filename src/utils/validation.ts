@@ -8,6 +8,8 @@ import type {
   SupportedVideoExtension,
 } from "../types/core";
 
+export { MAX_FILE_SIZE } from "../types/core";
+
 /**
  * MIME type mappings
  */

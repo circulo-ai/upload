@@ -36,6 +36,12 @@
       "import": "./dist/routes/next.mjs",
       "require": "./dist/routes/next.cjs",
       "default": "./dist/routes/next.mjs"
+    },
+    "./validation": {
+      "types": "./dist/utils/validation.d.mts",
+      "import": "./dist/utils/validation.mjs",
+      "require": "./dist/utils/validation.cjs",
+      "default": "./dist/utils/validation.mjs"
     }
   },
   "publishConfig": {
@@ -93,7 +99,7 @@
     "tsdown": "^0.17.0",
     "tsup": "^8.0.1",
     "typescript": "^5.9.3",
-    "vitest": "^1.6.1",
+    "vitest": "^4.1.10",
     "zod": "^4.1.13"
   },
   "engines": {
