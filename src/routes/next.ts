@@ -1,11 +1,14 @@
 import { z } from "zod";
+import type { FileRouter } from "../router";
 import { UploadError } from "../utils/errors";
 import { getContentType } from "../utils/validation";
 import {
   FileRouteHandler,
   type FileHandlerConfig,
   type UploadFile,
+  type UploadResponse,
 } from "./handler";
+import { FileRouterHandler } from "./router-handler";
 
 type RouteKey =
   | "delete"
@@ -13,6 +16,7 @@ type RouteKey =
   | "presigned"
   | "presignedBatch"
   | "multipart"
+  | "complete"
   | "upload"
   | "serve";
 
@@ -33,6 +37,10 @@ export interface NextRouteConfig<Req extends Request = Request> {
 }
 
 export interface NextFileRoutesOptions<Req extends Request = Request> {
+  /** Optional typed file router for endpoint-specific limits and lifecycle hooks. */
+  router?: FileRouter;
+  /** Query parameter used to select a file router endpoint. Defaults to endpoint. */
+  endpointParam?: string;
   /**
    * Provide extra metadata for uploads and presigned URL generation.
    * Runs only for routes that upload/generate presigned URLs.
@@ -54,6 +62,7 @@ export interface NextFileRoutesOptions<Req extends Request = Request> {
     presigned?: NextRouteConfig<Req>;
     presignedBatch?: NextRouteConfig<Req>;
     multipart?: NextRouteConfig<Req>;
+    complete?: NextRouteConfig<Req>;
     upload?: NextRouteConfig<Req>;
     serve?: NextRouteConfig<Req>;
   };
@@ -93,6 +102,7 @@ const presignedSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1),
   fileSize: z.number().positive(),
+  input: z.unknown().optional(),
 });
 
 const batchFileSchema = z.object({
@@ -103,6 +113,7 @@ const batchFileSchema = z.object({
 
 const batchSchema = z.object({
   files: z.array(batchFileSchema).min(1).max(100),
+  input: z.unknown().optional(),
 });
 
 const multipartInitiateSchema = z.object({
@@ -175,7 +186,11 @@ export function createNextFileHandler<Req extends Request = Request>(
   options: NextFileRoutesOptions<Req> = {},
 ): (req: Req, context?: NextRouteHandlerContext) => Promise<Response> {
   const handler = new FileRouteHandler(config);
+  const routerHandler = options.router
+    ? new FileRouterHandler({ ...config, router: options.router })
+    : undefined;
   const pathParam = options.pathParam ?? "path";
+  const endpointParam = options.endpointParam ?? "endpoint";
 
   const getMetadata = async (req: Req): Promise<Record<string, string>> =>
     options.getUploadMetadata ? await options.getUploadMetadata(req) : {};
@@ -185,6 +200,23 @@ export function createNextFileHandler<Req extends Request = Request>(
 
   const getMiddleware = (key: RouteKey): NextRouteMiddleware<Req>[] =>
     options.routes?.[key]?.middleware ?? [];
+
+  const getEndpoint = (url: URL): string | undefined =>
+    url.searchParams.get(endpointParam) ?? undefined;
+
+  const getRouterEndpoint = (url: URL): string | undefined => {
+    if (!routerHandler) return undefined;
+    const endpoint = getEndpoint(url);
+    if (!endpoint) {
+      throw new UploadError(
+        "MISSING_ENDPOINT",
+        `Query parameter '${endpointParam}' is required when a file router is configured`,
+        { endpointParam },
+        400,
+      );
+    }
+    return endpoint;
+  };
 
   const resolveRoute = (
     context?: NextRouteHandlerContext,
@@ -223,6 +255,8 @@ export function createNextFileHandler<Req extends Request = Request>(
         return { route: "presigned", rest };
       case "multipart":
         return { route: "multipart", rest };
+      case "complete":
+        return { route: "complete", rest };
       case "upload":
         return { route: "upload", rest };
       case "serve":
@@ -309,23 +343,32 @@ export function createNextFileHandler<Req extends Request = Request>(
           }
 
           const metadata = await getMetadata(req);
-          const { fileName, contentType, fileSize } = presignedSchema.parse(
-            await req.json(),
-          );
+          const { fileName, contentType, fileSize, input } =
+            presignedSchema.parse(await req.json());
           const contextParam =
             url.searchParams.get("type") ??
             url.searchParams.get("context") ??
             undefined;
 
-          const result = await handler.handlePresigned(
-            {
-              fileName,
-              contentType,
-              fileSize,
-              context: contextParam ?? undefined,
-            },
-            metadata,
-          );
+          const endpoint = getRouterEndpoint(url);
+          const result =
+            routerHandler && endpoint
+              ? await routerHandler.handlePresigned(
+                  endpoint,
+                  {
+                    fileName,
+                    contentType,
+                    fileSize,
+                    context: contextParam,
+                    input,
+                  },
+                  req,
+                  metadata,
+                )
+              : await handler.handlePresigned(
+                  { fileName, contentType, fileSize, context: contextParam },
+                  metadata,
+                );
           return json(result);
         }
 
@@ -338,13 +381,21 @@ export function createNextFileHandler<Req extends Request = Request>(
           }
 
           const metadata = await getMetadata(req);
-          const { files } = batchSchema.parse(await req.json());
+          const { files, input } = batchSchema.parse(await req.json());
           const type = url.searchParams.get("type") ?? undefined;
 
-          const result = await handler.handleBatchPresigned(
-            { files, type },
-            metadata,
-          );
+          const endpoint = getRouterEndpoint(url);
+          const result =
+            routerHandler && endpoint
+              ? await routerHandler.handleBatchPresigned(
+                  endpoint,
+                  files,
+                  req,
+                  type,
+                  metadata,
+                  input,
+                )
+              : await handler.handleBatchPresigned({ files, type }, metadata);
           return json(result);
         }
 
@@ -365,11 +416,16 @@ export function createNextFileHandler<Req extends Request = Request>(
           switch (action) {
             case "initiate": {
               const data = multipartInitiateSchema.parse(raw);
-              const result = await handler.handleMultipart(
-                action,
-                data,
-                metadata,
-              );
+              const endpoint = getRouterEndpoint(url);
+              const result =
+                routerHandler && endpoint
+                  ? await routerHandler.handleMultipartInitiate(
+                      endpoint,
+                      data,
+                      req,
+                      metadata,
+                    )
+                  : await handler.handleMultipart(action, data, metadata);
               return json(result);
             }
             case "get-part-urls": {
@@ -412,6 +468,11 @@ export function createNextFileHandler<Req extends Request = Request>(
 
           const metadata = await getMetadata(req);
           const formData = await req.formData();
+          const inputField = formData.get("input");
+          let routeInput: unknown;
+          if (typeof inputField === "string" && inputField.length > 0) {
+            routeInput = JSON.parse(inputField);
+          }
 
           const contextField = formData.get("context");
           const contextValue =
@@ -433,12 +494,45 @@ export function createNextFileHandler<Req extends Request = Request>(
             }
           }
 
-          const result = await handler.handleUpload(
-            validFiles,
-            contextValue,
-            metadata,
-          );
+          const endpoint = getRouterEndpoint(url);
+          const result =
+            routerHandler && endpoint
+              ? await routerHandler.handleUpload(
+                  endpoint,
+                  validFiles,
+                  req,
+                  contextValue,
+                  routeInput,
+                  metadata,
+                )
+              : await handler.handleUpload(validFiles, contextValue, metadata);
           return json(result);
+        }
+
+        case "complete": {
+          if (!routerHandler || routeInfo.rest.length > 0) return notFound();
+          if (req.method !== "POST") return methodNotAllowed();
+          const endpoint = getEndpoint(url);
+          if (!endpoint) {
+            throw new UploadError(
+              "MISSING_ENDPOINT",
+              `Query parameter '${endpointParam}' is required`,
+              { endpointParam },
+              400,
+            );
+          }
+          const body = (await req.json()) as {
+            files?: UploadResponse[];
+            input?: unknown;
+          };
+          return json(
+            await routerHandler.handleComplete(
+              endpoint,
+              body.files ?? [],
+              req,
+              body.input,
+            ),
+          );
         }
 
         case "serve": {
@@ -502,7 +596,7 @@ export function createNextFileHandler<Req extends Request = Request>(
             });
           }
 
-          return new Response(fileBuffer, {
+          return new Response(fileBuffer as unknown as BodyInit, {
             status: 200,
             headers: {
               "Content-Type": contentType,

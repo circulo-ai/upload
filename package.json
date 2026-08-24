@@ -1,7 +1,7 @@
 {
   "name": "@circulo-ai/upload",
-  "version": "1.5.3",
-  "description": "Universal file upload library with support for S3, Azure Blob, and local storage",
+  "version": "1.6.0",
+  "description": "Universal file upload library with support for S3, Azure Blob, FTP, Vercel Blob, and local storage",
   "type": "module",
   "private": false,
   "sideEffects": false,
@@ -42,6 +42,12 @@
       "import": "./dist/utils/validation.mjs",
       "require": "./dist/utils/validation.cjs",
       "default": "./dist/utils/validation.mjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.mts",
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.cjs",
+      "default": "./dist/react.mjs"
     }
   },
   "publishConfig": {
@@ -63,6 +69,8 @@
     "storage",
     "s3",
     "azure",
+    "ftp",
+    "ftps",
     "blob",
     "file-upload",
     "multipart",
@@ -74,8 +82,10 @@
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@azure/storage-blob": "^12.0.0",
+    "basic-ftp": "^6.2.0",
     "@hono/zod-validator": "^0.7.5",
     "hono": "^4.10.7",
+    "react": ">=18.2.0",
     "zod": "^4.1.13"
   },
   "peerDependenciesMeta": {
@@ -87,12 +97,21 @@
     },
     "@azure/storage-blob": {
       "optional": true
+    },
+    "basic-ftp": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.645.0",
     "@aws-sdk/s3-request-presigner": "^3.645.0",
     "@azure/storage-blob": "^12.19.0",
+    "basic-ftp": "^6.2.0",
+    "@types/react": "^19.2.2",
+    "react": "^19.2.0",
     "@hono/zod-validator": "^0.7.5",
     "@types/node": "^20.10.0",
     "hono": "^4.10.7",

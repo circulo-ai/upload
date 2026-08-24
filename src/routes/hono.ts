@@ -1,9 +1,15 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import type { FileRouter } from "../router";
 import { UploadError } from "../utils/errors";
 import { getContentType } from "../utils/validation";
-import { FileRouteHandler, type FileHandlerConfig } from "./handler";
+import {
+  FileRouteHandler,
+  type FileHandlerConfig,
+  type UploadResponse,
+} from "./handler";
+import { FileRouterHandler } from "./router-handler";
 
 export type { FileHandlerConfig } from "./handler";
 
@@ -13,6 +19,10 @@ export interface RouteConfig<E extends Env> {
 }
 
 export interface HonoFileRoutesOptions<E extends Env = Env> {
+  /** Optional typed file router for endpoint-specific limits and lifecycle hooks. */
+  router?: FileRouter;
+  /** Query parameter used to select a file router endpoint. Defaults to endpoint. */
+  endpointParam?: string;
   getUploadMetadata?: (
     c: Context<E>,
   ) => Promise<Record<string, string>> | Record<string, string>;
@@ -23,6 +33,7 @@ export interface HonoFileRoutesOptions<E extends Env = Env> {
     presigned?: RouteConfig<E>;
     presignedBatch?: RouteConfig<E>;
     multipart?: RouteConfig<E>;
+    complete?: RouteConfig<E>;
     upload?: RouteConfig<E>;
     serve?: RouteConfig<E>;
   };
@@ -69,6 +80,10 @@ export function createHonoFileRoutes<E extends Env = Env>(
   options: HonoFileRoutesOptions<E> = {},
 ) {
   const handler = new FileRouteHandler(config);
+  const routerHandler = options.router
+    ? new FileRouterHandler({ ...config, router: options.router })
+    : undefined;
+  const endpointParam = options.endpointParam ?? "endpoint";
   const router = new Hono<E>();
   const registrar = router as unknown as RouteRegistrar<E>;
   const post = (path: string, ...handlers: RouteHandler<E>[]): void => {
@@ -88,6 +103,20 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
   const getMiddleware = (key: RouteKey): MiddlewareHandler<E>[] =>
     options.routes?.[key]?.middleware ?? [];
+
+  const getRouterEndpoint = (c: Context<E>): string | undefined => {
+    if (!routerHandler) return undefined;
+    const endpoint = c.req.query(endpointParam);
+    if (!endpoint) {
+      throw new UploadError(
+        "MISSING_ENDPOINT",
+        `Query parameter '${endpointParam}' is required when a file router is configured`,
+        { endpointParam },
+        400,
+      );
+    }
+    return endpoint;
+  };
 
   const toStatus = (status?: number): ContentfulStatusCode =>
     Math.min(599, Math.max(200, status ?? 500)) as ContentfulStatusCode;
@@ -159,21 +188,31 @@ export function createHonoFileRoutes<E extends Env = Env>(
       fileName: z.string().min(1),
       contentType: z.string().min(1),
       fileSize: z.number().positive(),
+      input: z.unknown().optional(),
     });
 
     post("/presigned", ...getMiddleware("presigned"), async (c) => {
       try {
         const metadata = await getMetadata(c);
         const validated = presignedSchema.parse(await c.req.json());
-        const { fileName, contentType, fileSize } = validated;
+        const { fileName, contentType, fileSize, input } = validated;
 
         const context =
           c.req.query("type") ?? c.req.query("context") ?? undefined;
 
-        const result = await handler.handlePresigned(
-          { fileName, contentType, fileSize, context },
-          metadata,
-        );
+        const endpoint = getRouterEndpoint(c);
+        const result =
+          routerHandler && endpoint
+            ? await routerHandler.handlePresigned(
+                endpoint,
+                { fileName, contentType, fileSize, context, input },
+                c.req.raw,
+                metadata,
+              )
+            : await handler.handlePresigned(
+                { fileName, contentType, fileSize, context },
+                metadata,
+              );
         return c.json(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -210,20 +249,29 @@ export function createHonoFileRoutes<E extends Env = Env>(
 
     const batchSchema = z.object({
       files: z.array(batchFileSchema).min(1).max(100),
+      input: z.unknown().optional(),
     });
 
     post("/presigned/batch", ...getMiddleware("presignedBatch"), async (c) => {
       try {
         const metadata = await getMetadata(c);
         const validated = batchSchema.parse(await c.req.json());
-        const { files } = validated;
+        const { files, input } = validated;
 
         const type = c.req.query("type") ?? undefined;
 
-        const result = await handler.handleBatchPresigned(
-          { files, type },
-          metadata,
-        );
+        const endpoint = getRouterEndpoint(c);
+        const result =
+          routerHandler && endpoint
+            ? await routerHandler.handleBatchPresigned(
+                endpoint,
+                files,
+                c.req.raw,
+                type,
+                metadata,
+                input,
+              )
+            : await handler.handleBatchPresigned({ files, type }, metadata);
         return c.json(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -324,11 +372,16 @@ export function createHonoFileRoutes<E extends Env = Env>(
         switch (action) {
           case "initiate": {
             const data = multipartInitiateSchema.parse(raw);
-            const result = await handler.handleMultipart(
-              action,
-              data,
-              metadata,
-            );
+            const endpoint = getRouterEndpoint(c);
+            const result =
+              routerHandler && endpoint
+                ? await routerHandler.handleMultipartInitiate(
+                    endpoint,
+                    data,
+                    c.req.raw,
+                    metadata,
+                  )
+                : await handler.handleMultipart(action, data, metadata);
             return c.json(result);
           }
 
@@ -395,6 +448,11 @@ export function createHonoFileRoutes<E extends Env = Env>(
       try {
         const metadata = await getMetadata(c);
         const formData = await c.req.parseBody({ all: true });
+        const inputRaw = formData["input"];
+        let routeInput: unknown;
+        if (typeof inputRaw === "string" && inputRaw.length > 0) {
+          routeInput = JSON.parse(inputRaw);
+        }
 
         const contextRaw = formData["context"];
         const context = typeof contextRaw === "string" ? contextRaw : undefined;
@@ -419,11 +477,18 @@ export function createHonoFileRoutes<E extends Env = Env>(
           }
         }
 
-        const result = await handler.handleUpload(
-          validFiles,
-          context,
-          metadata,
-        );
+        const endpoint = getRouterEndpoint(c);
+        const result =
+          routerHandler && endpoint
+            ? await routerHandler.handleUpload(
+                endpoint,
+                validFiles,
+                c.req.raw,
+                context,
+                routeInput,
+                metadata,
+              )
+            : await handler.handleUpload(validFiles, context, metadata);
         return c.json(result);
       } catch (error) {
         if (error instanceof UploadError) {
@@ -438,6 +503,48 @@ export function createHonoFileRoutes<E extends Env = Env>(
         }
         return c.json(
           { error: error instanceof Error ? error.message : "Upload failed" },
+          500,
+        );
+      }
+    });
+  }
+
+  // ROUTER COMPLETION (used after a direct presigned upload)
+  if (routerHandler && options.routes?.complete?.enabled !== false) {
+    post("/complete", ...getMiddleware("complete"), async (c) => {
+      try {
+        const endpoint = c.req.query(endpointParam);
+        if (!endpoint) {
+          throw new UploadError(
+            "MISSING_ENDPOINT",
+            `Query parameter '${endpointParam}' is required`,
+            { endpointParam },
+            400,
+          );
+        }
+        const body = (await c.req.json()) as {
+          files?: UploadResponse[];
+          input?: unknown;
+        };
+        return c.json(
+          await routerHandler.handleComplete(
+            endpoint,
+            body.files ?? [],
+            c.req.raw,
+            body.input,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof UploadError) {
+          return c.json(
+            { error: error.message, code: error.code, details: error.details },
+            toStatus(error.status),
+          );
+        }
+        return c.json(
+          {
+            error: error instanceof Error ? error.message : "Completion failed",
+          },
           500,
         );
       }
@@ -483,18 +590,21 @@ export function createHonoFileRoutes<E extends Env = Env>(
         const contentType =
           getContentType(filename) ?? "application/octet-stream";
 
-        return new Response(method === "HEAD" ? null : fileBuffer, {
-          status: 200,
-          headers: {
-            "Content-Type": contentType,
-            "Content-Disposition": `inline; filename="${filename}"`,
-            "Cache-Control": "public, max-age=31536000",
-            "X-Content-Type-Options": "nosniff",
-            ...(method === "HEAD"
-              ? { "Content-Length": fileBuffer.byteLength.toString() }
-              : {}),
+        return new Response(
+          method === "HEAD" ? null : (fileBuffer as unknown as BodyInit),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": contentType,
+              "Content-Disposition": `inline; filename="${filename}"`,
+              "Cache-Control": "public, max-age=31536000",
+              "X-Content-Type-Options": "nosniff",
+              ...(method === "HEAD"
+                ? { "Content-Length": fileBuffer.byteLength.toString() }
+                : {}),
+            },
           },
-        });
+        );
       } catch (error) {
         if (error instanceof UploadError) {
           const status = toStatus(error.status);

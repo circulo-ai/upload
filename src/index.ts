@@ -21,6 +21,7 @@ export type {
   S3UploadPart,
   SupportedAudioExtension,
   SupportedDocumentExtension,
+  SupportedImageExtension,
   SupportedMediaExtension,
   SupportedVideoExtension,
   UploadOptions,
@@ -30,6 +31,7 @@ export {
   MAX_FILE_SIZE,
   SUPPORTED_AUDIO_EXTENSIONS,
   SUPPORTED_DOCUMENT_EXTENSIONS,
+  SUPPORTED_IMAGE_EXTENSIONS,
   SUPPORTED_VIDEO_EXTENSIONS,
 } from "./types/core";
 
@@ -41,6 +43,14 @@ export {
   AzureBlobStorageProvider,
   type AzureBlobConfig,
 } from "./providers/azure-blob";
+export {
+  FtpStorageProvider,
+  type FtpAccessOptions,
+  type FtpClient,
+  type FtpClientFactory,
+  type FtpClientFactoryOptions,
+  type FtpConfig,
+} from "./providers/ftp";
 export {
   LocalStorageProvider,
   type LocalStorageConfig,
@@ -99,6 +109,7 @@ export {
 export {
   MIME_TYPE_MAPPING,
   SUPPORTED_AUDIO_MIME_TYPES,
+  SUPPORTED_IMAGE_MIME_TYPES,
   SUPPORTED_MIME_TYPES,
   SUPPORTED_VIDEO_MIME_TYPES,
   formatFileSize,
@@ -117,3 +128,31 @@ export {
   isValidUrl,
   sanitizeFilename,
 } from "./utils/security";
+
+// Typed file routers
+export {
+  FileRouteBuilder,
+  createFileRouter,
+  f,
+  getFileRouteRule,
+  parseFileSize,
+  type FileRouteComplete,
+  type FileRouteCompleteContext,
+  type FileRouteConfig,
+  type FileRouteDefinition,
+  type FileRouteFile,
+  type FileRouteFileType,
+  type FileRouteInputParser,
+  type FileRouteMiddleware,
+  type FileRouteMiddlewareContext,
+  type FileRouteRule,
+  type FileRouter,
+  type FileRouterEndpoint,
+  type FileRouterInput,
+} from "./router";
+export {
+  FileRouterHandler,
+  type FileRouterCompletionFile,
+  type FileRouterCompletionResponse,
+  type FileRouterHandlerConfig,
+} from "./routes/router-handler";

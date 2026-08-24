@@ -74,6 +74,7 @@ export interface PresignedRequest {
   contentType: string;
   fileSize: number;
   context?: string;
+  input?: unknown;
 }
 
 export interface PresignedResponse {
@@ -98,6 +99,7 @@ export interface BatchPresignedRequest {
     fileSize: number;
   }>;
   type?: string;
+  input?: unknown;
 }
 
 export interface BatchPresignedResponse {

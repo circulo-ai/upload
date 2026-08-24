@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0
+
+### Minor Changes
+
+- Release the accumulated public-package improvements, including the upload
+  provider adapters, FTP/FTPS support, typed file routers, React upload helpers,
+  and the associated runtime and developer-experience updates.
+
 ## 1.5.3
 
 ### Patch Changes

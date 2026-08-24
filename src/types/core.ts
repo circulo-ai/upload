@@ -217,6 +217,18 @@ export interface MultipartCompleteResponse {
 // ============================================================================
 
 /**
+ * Supported image file extensions
+ */
+export const SUPPORTED_IMAGE_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "svg",
+] as const;
+
+/**
  * Supported document file extensions
  */
 export const SUPPORTED_DOCUMENT_EXTENSIONS = [
@@ -264,11 +276,14 @@ export const SUPPORTED_VIDEO_EXTENSIONS = [
 
 export type SupportedDocumentExtension =
   (typeof SUPPORTED_DOCUMENT_EXTENSIONS)[number];
+export type SupportedImageExtension =
+  (typeof SUPPORTED_IMAGE_EXTENSIONS)[number];
 export type SupportedAudioExtension =
   (typeof SUPPORTED_AUDIO_EXTENSIONS)[number];
 export type SupportedVideoExtension =
   (typeof SUPPORTED_VIDEO_EXTENSIONS)[number];
 export type SupportedMediaExtension =
+  | SupportedImageExtension
   | SupportedDocumentExtension
   | SupportedAudioExtension
   | SupportedVideoExtension;

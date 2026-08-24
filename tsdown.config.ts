@@ -9,6 +9,7 @@ export default defineConfig({
     "src/routes/hono.ts",
     "src/routes/next.ts",
     "src/utils/validation.ts",
+    "src/react.tsx",
   ],
   outDir: "dist",
   clean: true,

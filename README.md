@@ -1,18 +1,18 @@
 # @circulo-ai/upload
 
-A type-safe, multi-provider file upload framework for Node.js and Next.js,
-with first-class support for presigned URLs and multipart uploads.
+A type-safe, multi-provider file upload framework for Node.js, React, Next.js,
+and Hono, with first-class support for presigned URLs and multipart uploads.
 
 ## Features
 
 - 🧠 **Type-safe storage contexts**: compile-time safety when routing files
   across multiple buckets, containers, or backends.
-- 🌐 **Multi-provider support**: AWS S3, Azure Blob, Local storage, Vercel Blob
+- 🌐 **Multi-provider support**: AWS S3, Azure Blob, FTP/FTPS, Local storage, Vercel Blob
 - 🪣 **Multi-bucket/container**: Organize files across different storage contexts
 - 📦 **Multipart uploads**: Large file support with resumable uploads
 - 🔐 **Presigned URLs**: Direct client-to-storage uploads
 - 📝 **TypeScript**: Full type safety with generics
-- 🎯 **Zero dependencies**: Only peer dependencies for storage providers you use
+- 🎯 **Optional integrations**: Install only the provider and framework peers you use
 - 🔒 **Secure**: Built-in path traversal protection and filename sanitization
 - 🧩 **Extensible**: Lifecycle hooks and structured errors for predictable DX
 
@@ -24,6 +24,7 @@ npm install @circulo-ai/upload
 # Install the storage provider(s) you need:
 npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner    # For S3
 npm install @azure/storage-blob                                 # For Azure Blob
+npm install basic-ftp                                             # For FTP/FTPS
 # Local storage has no dependencies
 ```
 
@@ -32,6 +33,8 @@ npm install @azure/storage-blob                                 # For Azure Blob
 - **StorageProvider**: low-level adapter for one backend (S3, Azure Blob, Vercel Blob, Local). Use directly for single-bucket/simple cases.
 - **StorageManager** (recommended): orchestrates multiple named providers/contexts (e.g., `uploads`, `public`, `temp`) with shared helpers (presign, multipart) and type-safe context selection.
 - **Route adapters**: `@circulo-ai/upload/next` and `@circulo-ai/upload/hono` expose HTTP handlers for uploads, presigned URLs, multipart, and serving files.
+- **File routers**: define typed endpoints with `f(...)`, per-endpoint limits, request middleware, and completion callbacks.
+- **React helpers**: `@circulo-ai/upload/react` provides typed `useFileUpload`, `UploadButton`, and `UploadDropzone` primitives.
 
 ### Environment Compatibility
 
@@ -205,6 +208,136 @@ export async function POST(req: NextRequest) {
   return Response.json(info);
 }
 ```
+
+#### FtpStorageProvider
+
+```typescript
+import { FtpStorageProvider } from "@circulo-ai/upload";
+
+const ftp = new FtpStorageProvider({
+  host: process.env.FTP_HOST!,
+  port: Number(process.env.FTP_PORT || 21),
+  user: process.env.FTP_USER!,
+  password: process.env.FTP_PASSWORD!,
+  secure: true, // Use explicit FTPS; use "implicit" when required by the server
+  rootDirectory: "/var/www/uploads",
+  pathPrefix: "files",
+  serveBaseUrl: "/api/files/serve",
+});
+
+const uploaded = await ftp.upload({
+  file: Buffer.from("hello"),
+  fileName: "hello.txt",
+  contentType: "text/plain",
+});
+```
+
+FTP providers support upload, download, and delete through the server. FTP
+does not provide presigned URLs or cloud-style multipart uploads, so those
+capabilities are reported as unsupported and the route handler uses its
+server-side download path.
+
+### Typed file routers
+
+File routers provide an UploadThing-like developer experience while keeping
+storage and HTTP routing in this package's abstractions:
+
+```typescript
+import {
+  f,
+  type FileRouter,
+  StorageManager,
+  FtpStorageProvider,
+} from "@circulo-ai/upload";
+import { createNextFileHandler } from "@circulo-ai/upload/next";
+
+export const fileRouter = {
+  imageUploader: f({ image: { maxFileSize: "4MB", maxFileCount: 1 } })
+    .middleware(async ({ req }) => {
+      const userId = req.headers.get("x-user-id");
+      if (!userId) throw new Error("Unauthorized");
+      return { userId };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      await saveUploadedFile({ userId: metadata.userId, key: file.key });
+      return { persisted: true };
+    }),
+} satisfies FileRouter;
+
+const storageManager = new StorageManager({
+  providers: {
+    uploads: new FtpStorageProvider({
+      host: process.env.FTP_HOST!,
+      user: process.env.FTP_USER!,
+      password: process.env.FTP_PASSWORD!,
+      secure: true,
+      rootDirectory: "/srv/uploads",
+    }),
+  },
+  defaultContext: "uploads",
+});
+
+export const POST = createNextFileHandler(
+  { storageManager },
+  { router: fileRouter },
+);
+```
+
+The router adapter accepts `endpoint` as a query parameter. It supports the
+`presigned`, `presigned/batch`, `upload`, `multipart`, and `complete` flows;
+the last endpoint runs `onUploadComplete` after a direct browser upload.
+
+### React button, dropzone, and hook
+
+```tsx
+import {
+  createUploadHelpers,
+  generateUploadComponents,
+} from "@circulo-ai/upload/react";
+import { fileRouter } from "./file-router";
+
+export const { UploadButton, UploadDropzone } = generateUploadComponents(
+  fileRouter,
+  { url: "/api/files" },
+);
+
+export function AvatarUploader() {
+  const { useFileUpload } = createUploadHelpers(fileRouter, {
+    url: "/api/files",
+  });
+  const { startUpload, isUploading, progress, error } = useFileUpload(
+    "imageUploader",
+    {
+      onUploadComplete: (files) => console.log("uploaded", files),
+    },
+  );
+
+  return (
+    <>
+      <UploadButton endpoint="imageUploader" />
+      <UploadDropzone endpoint="imageUploader" />
+      <input
+        type="file"
+        multiple
+        accept="image/*"
+        disabled={isUploading}
+        onChange={(event) => {
+          if (event.currentTarget.files)
+            void startUpload(event.currentTarget.files);
+        }}
+      />
+      <span>{isUploading ? `Uploading (${progress}%)` : "Ready"}</span>
+      {error && <p role="alert">{error.message}</p>}
+    </>
+  );
+}
+```
+
+The helpers use direct presigned uploads when the selected provider supports
+them. FTP and local providers automatically use the secure server-side
+`multipart/form-data` route instead. The component primitives expose accessible
+loading, disabled, drag state, progress, and error states while remaining
+unstyled enough to fit an application's design system.
 
 ### StorageManager
 

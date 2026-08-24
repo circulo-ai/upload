@@ -48,6 +48,12 @@ export class LocalStorageProvider extends BaseStorageProvider {
       return key;
     }
     const prefix = this.config.pathPrefix.replace(/\/$/, "");
+    // StorageManager passes the provider's returned key back to download and
+    // delete. Treat already-prefixed keys as canonical so context prefixes are
+    // not duplicated (for example, `chat/chat/file.jpg`).
+    if (key === prefix || key.startsWith(`${prefix}/`)) {
+      return key;
+    }
     return `${prefix}/${key}`;
   }
 

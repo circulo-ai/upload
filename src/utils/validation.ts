@@ -4,6 +4,7 @@ import type {
   MAX_FILE_SIZE,
   SupportedAudioExtension,
   SupportedDocumentExtension,
+  SupportedImageExtension,
   SupportedMediaExtension,
   SupportedVideoExtension,
 } from "../types/core";
@@ -118,6 +119,18 @@ export const SUPPORTED_MIME_TYPES: Record<
   yml: ["text/yaml", "text/x-yaml", "application/yaml", "application/x-yaml"],
 };
 
+export const SUPPORTED_IMAGE_MIME_TYPES: Record<
+  SupportedImageExtension,
+  string[]
+> = {
+  jpg: ["image/jpeg", "image/jpg"],
+  jpeg: ["image/jpeg", "image/jpg"],
+  png: ["image/png"],
+  gif: ["image/gif"],
+  webp: ["image/webp"],
+  svg: ["image/svg+xml"],
+};
+
 export const SUPPORTED_AUDIO_MIME_TYPES: Record<
   SupportedAudioExtension,
   string[]
@@ -230,6 +243,22 @@ export function validateFileType(
       message: "Invalid MIME type",
       supportedTypes: [],
     };
+  }
+
+  // Images are valid chat attachments and need their own extension/MIME check.
+  if (extension in SUPPORTED_IMAGE_MIME_TYPES) {
+    const allowedMimeTypes =
+      SUPPORTED_IMAGE_MIME_TYPES[extension as SupportedImageExtension];
+
+    if (!allowedMimeTypes.includes(baseMimeType)) {
+      return {
+        code: "MIME_TYPE_MISMATCH",
+        message: `MIME type ${baseMimeType} does not match file extension ${extension}`,
+        supportedTypes: allowedMimeTypes,
+      };
+    }
+
+    return null;
   }
 
   // Check document types

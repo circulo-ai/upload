@@ -11,6 +11,11 @@ describe("upload validation", () => {
     expect(validateFileType("report.pdf", "application/pdf")).toBeNull();
   });
 
+  it("accepts common image attachments", () => {
+    expect(validateFileType("photo.jpg", "image/jpeg")).toBeNull();
+    expect(validateFileType("photo.png", "image/png")).toBeNull();
+  });
+
   it("rejects MIME types that do not match the extension", () => {
     expect(validateFileType("report.pdf", "image/png")).toMatchObject({
       code: "MIME_TYPE_MISMATCH",

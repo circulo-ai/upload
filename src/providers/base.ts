@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   DeleteOptions,
   DownloadOptions,
@@ -147,7 +148,7 @@ export abstract class BaseStorageProvider implements StorageProvider {
     if (preserveKey) {
       return safeFileName;
     }
-    return `${Date.now()}-${safeFileName}`;
+    return `${Date.now()}-${randomUUID()}-${safeFileName}`;
   }
 
   /**
