@@ -72,6 +72,16 @@ export class S3StorageProvider extends BaseStorageProvider {
 
   constructor(config: S3Config) {
     super();
+    if (!config.bucket.trim()) throw new Error("S3 bucket is required");
+    if (!config.region.trim()) throw new Error("S3 region is required");
+    if (config.pathPrefix)
+      this.normalizeKey(config.pathPrefix.replace(/^\/+|\/+$/g, ""));
+    if (config.endpoint) {
+      const endpoint = new URL(config.endpoint);
+      if (!["http:", "https:"].includes(endpoint.protocol)) {
+        throw new Error("S3 endpoint must use http or https");
+      }
+    }
     this.config = config;
 
     const clientConfig: S3ClientConfig = {
@@ -96,13 +106,18 @@ export class S3StorageProvider extends BaseStorageProvider {
    * Get the full key including path prefix
    */
   private getFullKey(key: string): string {
+    const normalizedKey = this.normalizeKey(key);
     const prefix = this.config.pathPrefix?.replace(/\/$/, "");
-    if (!prefix) return key;
+    if (!prefix) return normalizedKey;
+    const normalizedPrefix = this.normalizeKey(prefix);
     // Avoid double-prefixing when caller already includes the prefix
-    if (key === prefix || key.startsWith(`${prefix}/`)) {
-      return key;
+    if (
+      normalizedKey === normalizedPrefix ||
+      normalizedKey.startsWith(`${normalizedPrefix}/`)
+    ) {
+      return normalizedKey;
     }
-    return `${prefix}/${key}`;
+    return this.normalizeKey(`${normalizedPrefix}/${normalizedKey}`);
   }
 
   /**
@@ -121,9 +136,9 @@ export class S3StorageProvider extends BaseStorageProvider {
     );
 
     const uploadMetadata: Record<string, string> = {
+      ...metadata,
       originalName: encodeURIComponent(fileName),
       uploadedAt: new Date().toISOString(),
-      ...metadata,
     };
 
     await this.client.send(
@@ -164,9 +179,29 @@ export class S3StorageProvider extends BaseStorageProvider {
 
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.on("end", () => resolve(Buffer.concat(chunks)));
-      stream.on("error", reject);
+      let totalBytes = 0;
+      let settled = false;
+      stream.on("data", (chunk: Buffer | Uint8Array) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        totalBytes += buffer.length;
+        if (options.maxBytes !== undefined && totalBytes > options.maxBytes) {
+          settled = true;
+          (
+            stream as NodeJS.ReadableStream & {
+              destroy?: (error?: Error) => void;
+            }
+          ).destroy?.(new Error("File exceeds the configured download limit"));
+          reject(new Error("File exceeds the configured download limit"));
+          return;
+        }
+        chunks.push(buffer);
+      });
+      stream.on("end", () => {
+        if (!settled) resolve(Buffer.concat(chunks));
+      });
+      stream.on("error", (error) => {
+        if (!settled) reject(error);
+      });
     });
   }
 
@@ -189,20 +224,15 @@ export class S3StorageProvider extends BaseStorageProvider {
   async generatePresignedUploadUrl(
     options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse> {
-    const {
-      fileName,
-      contentType,
-      fileSize,
-      expirationSeconds = 3600,
-      metadata,
-    } = options;
+    const { fileName, contentType, fileSize, expirationSeconds, metadata } =
+      options;
 
     const key = this.getFullKey(this.generateKey(fileName));
 
     const uploadMetadata: Record<string, string> = {
+      ...metadata,
       originalName: this.sanitizeFilename(fileName),
       uploadedAt: new Date().toISOString(),
-      ...metadata,
     };
 
     const command = new PutObjectCommand({
@@ -214,7 +244,7 @@ export class S3StorageProvider extends BaseStorageProvider {
     });
 
     const url = await getSignedUrl(this.client, command, {
-      expiresIn: expirationSeconds,
+      expiresIn: this.normalizeExpirationSeconds(expirationSeconds),
     });
 
     return {
@@ -226,7 +256,7 @@ export class S3StorageProvider extends BaseStorageProvider {
   async generatePresignedDownloadUrl(
     options: PresignedDownloadUrlOptions,
   ): Promise<string> {
-    const { key, expirationSeconds = 3600 } = options;
+    const { key, expirationSeconds } = options;
     const fullKey = this.getFullKey(key);
 
     const command = new GetObjectCommand({
@@ -234,7 +264,9 @@ export class S3StorageProvider extends BaseStorageProvider {
       Key: fullKey,
     });
 
-    return getSignedUrl(this.client, command, { expiresIn: expirationSeconds });
+    return getSignedUrl(this.client, command, {
+      expiresIn: this.normalizeExpirationSeconds(expirationSeconds),
+    });
   }
 
   supportsMultipartUpload(): boolean {
@@ -246,20 +278,12 @@ export class S3StorageProvider extends BaseStorageProvider {
   ): Promise<MultipartInitResponse> {
     const { fileName, contentType, metadata } = options;
 
-    const safeFileName = fileName
-      .replace(/\s+/g, "-")
-      .replace(/[^a-zA-Z0-9.-]/g, "_");
-
-    const key = this.getFullKey(
-      `${Date.now()}-${Math.random()
-        .toString(36)
-        .substring(2, 9)}-${safeFileName}`,
-    );
+    const key = this.getFullKey(this.generateKey(fileName));
 
     const uploadMetadata: Record<string, string> = {
+      ...metadata,
       originalName: this.sanitizeFilename(fileName),
       uploadedAt: new Date().toISOString(),
-      ...metadata,
     };
 
     const command = new CreateMultipartUploadCommand({

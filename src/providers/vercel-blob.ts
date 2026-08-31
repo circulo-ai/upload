@@ -86,13 +86,18 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    * - Joins them with a single `/`
    */
   private getFullPath(key: string): string {
-    const cleanedKey = key.replace(/^\/+/, "");
+    const cleanedKey = this.normalizeKey(key);
     if (!this.config.pathPrefix) {
       return cleanedKey;
     }
 
-    const prefix = this.config.pathPrefix.replace(/^\/+|\/+$/g, "");
-    return `${prefix}/${cleanedKey}`;
+    const prefix = this.normalizeKey(
+      this.config.pathPrefix.replace(/^\/+|\/+$/g, ""),
+    );
+    if (cleanedKey === prefix || cleanedKey.startsWith(`${prefix}/`)) {
+      return cleanedKey;
+    }
+    return this.normalizeKey(`${prefix}/${cleanedKey}`);
   }
 
   /**
@@ -158,6 +163,14 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
       );
     }
 
+    if (
+      options.maxBytes !== undefined &&
+      typeof blobMeta.size === "number" &&
+      blobMeta.size > options.maxBytes
+    ) {
+      throw new Error("File exceeds the configured download limit");
+    }
+
     // Step 2: stream the blob into memory using global fetch
     const fetchImpl: any = (globalThis as any).fetch;
     if (typeof fetchImpl !== "function") {
@@ -174,6 +187,12 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
     }
 
     const arrayBuffer: ArrayBuffer = await res.arrayBuffer();
+    if (
+      options.maxBytes !== undefined &&
+      arrayBuffer.byteLength > options.maxBytes
+    ) {
+      throw new Error("File exceeds the configured download limit");
+    }
     return Buffer.from(arrayBuffer);
   }
 

@@ -15,6 +15,10 @@ export interface FileHandlerConfig {
    */
   storageManager: StorageManager | StorageManagerFactory;
   maxFileSize?: number;
+  /** Maximum server-side download size; defaults to maxFileSize. */
+  maxDownloadSize?: number;
+  /** Maximum number of files accepted by non-router batch/upload requests. */
+  maxFileCount?: number;
   /**
    * Optional type/MIME validation hook.
    * Return a FileValidationError or UploadError to block the request, or null to allow.
@@ -186,13 +190,29 @@ export interface ServeResponse {
 export class FileRouteHandler {
   private storageManager: StorageManager | StorageManagerFactory;
   private maxFileSize: number;
+  private maxDownloadSize: number;
+  private maxFileCount: number;
   private validateFileFn?: FileHandlerConfig["validateFile"];
   private serveUrlBuilder: (key: string, context: string) => string;
   private hooks?: FileHandlerHooks;
 
   constructor(config: FileHandlerConfig) {
     this.storageManager = config.storageManager;
-    this.maxFileSize = config.maxFileSize || MAX_FILE_SIZE;
+    this.maxFileSize = config.maxFileSize ?? MAX_FILE_SIZE;
+    if (!Number.isSafeInteger(this.maxFileSize) || this.maxFileSize <= 0) {
+      throw new Error("maxFileSize must be a positive safe integer");
+    }
+    this.maxDownloadSize = config.maxDownloadSize ?? this.maxFileSize;
+    if (
+      !Number.isSafeInteger(this.maxDownloadSize) ||
+      this.maxDownloadSize <= 0
+    ) {
+      throw new Error("maxDownloadSize must be a positive safe integer");
+    }
+    this.maxFileCount = config.maxFileCount ?? 100;
+    if (!Number.isSafeInteger(this.maxFileCount) || this.maxFileCount <= 0) {
+      throw new Error("maxFileCount must be a positive safe integer");
+    }
     this.validateFileFn = config.validateFile;
     this.hooks = config.hooks;
     this.serveUrlBuilder =
@@ -271,6 +291,57 @@ export class FileRouteHandler {
     );
   }
 
+  private validateFileInput(
+    fileName: string,
+    contentType: string,
+    fileSize: number,
+  ): void {
+    if (
+      typeof fileName !== "string" ||
+      fileName.trim().length === 0 ||
+      fileName.length > 1_024 ||
+      /[\x00-\x1F\x7F]/.test(fileName)
+    ) {
+      throw new UploadError("INVALID_INPUT", "A valid file name is required");
+    }
+    if (
+      typeof contentType !== "string" ||
+      contentType.length === 0 ||
+      contentType.length > 255 ||
+      /[\r\n]/.test(contentType)
+    ) {
+      throw new UploadError(
+        "INVALID_INPUT",
+        "A valid content type is required",
+      );
+    }
+    if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
+      throw new UploadError(
+        "INVALID_INPUT",
+        "File size must be a positive safe integer",
+      );
+    }
+  }
+
+  private validatePartNumbers(partNumbers: number[]): void {
+    if (
+      partNumbers.length === 0 ||
+      partNumbers.length > 10_000 ||
+      partNumbers.some(
+        (partNumber) =>
+          !Number.isSafeInteger(partNumber) ||
+          partNumber < 1 ||
+          partNumber > 10_000,
+      ) ||
+      new Set(partNumbers).size !== partNumbers.length
+    ) {
+      throw new UploadError(
+        "INVALID_INPUT",
+        "Multipart part numbers must be unique integers from 1 through 10000",
+      );
+    }
+  }
+
   async handleDelete(
     key: string,
     contextInput?: string,
@@ -296,6 +367,9 @@ export class FileRouteHandler {
     name?: string,
     contextInput?: string,
   ): Promise<DownloadResponse> {
+    if (!key) {
+      throw new UploadError("MISSING_KEY", "File key is required");
+    }
     const storageManager = this.resolveStorageManager();
     const context = this.getContext(contextInput, storageManager);
     const rawName = name || key.split("/").pop() || "download";
@@ -324,11 +398,12 @@ export class FileRouteHandler {
         fileName,
       };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Download failed";
+      const message = "Download failed";
+      const internalMessage =
+        error instanceof Error ? error.message.toLowerCase() : "";
       const status =
-        message.toLowerCase().includes("not found") ||
-        message.toLowerCase().includes("missing")
+        internalMessage.includes("not found") ||
+        internalMessage.includes("missing")
           ? 404
           : 500;
       const uploadError =
@@ -354,6 +429,7 @@ export class FileRouteHandler {
     const context = this.getContext(contextInput, storageManager);
 
     try {
+      this.validateFileInput(fileName, contentType, fileSize);
       const sizeError = validateFileSize(fileSize, this.maxFileSize);
       if (sizeError) {
         throw new UploadError(
@@ -438,7 +514,17 @@ export class FileRouteHandler {
     const context = this.getContext(type, storageManager);
 
     try {
+      if (!Array.isArray(files) || files.length === 0) {
+        throw new UploadError("NO_FILES", "No files provided");
+      }
+      if (files.length > this.maxFileCount) {
+        throw new UploadError(
+          "TOO_MANY_FILES",
+          `At most ${this.maxFileCount} files are allowed`,
+        );
+      }
       for (const file of files) {
+        this.validateFileInput(file.fileName, file.contentType, file.fileSize);
         if (file.fileSize > this.maxFileSize) {
           throw new UploadError(
             "FILE_TOO_LARGE",
@@ -552,6 +638,7 @@ export class FileRouteHandler {
             metadata: clientMetadata,
           } = initiateData;
 
+          this.validateFileInput(fileName, contentType, fileSize);
           const sizeError = validateFileSize(fileSize, this.maxFileSize);
           if (sizeError) {
             throw new UploadError(sizeError.code, sizeError.message, {
@@ -579,6 +666,14 @@ export class FileRouteHandler {
           const urlData = data as MultipartGetPartUrlsData;
           const { uploadId, key, partNumbers } = urlData;
 
+          if (!uploadId || !key) {
+            throw new UploadError(
+              "INVALID_INPUT",
+              "Multipart uploadId and key are required",
+            );
+          }
+          this.validatePartNumbers(partNumbers);
+
           const urls = await storageManager.getMultipartPartUrls({
             uploadId,
             key,
@@ -592,6 +687,17 @@ export class FileRouteHandler {
           const completeData = data as MultipartCompleteData;
           const { uploadId, key, parts } = completeData;
 
+          if (!uploadId || !key || parts.length === 0) {
+            throw new UploadError(
+              "INVALID_INPUT",
+              "Multipart uploadId, key, and parts are required",
+            );
+          }
+          const completePartNumbers = parts.map((part) =>
+            "PartNumber" in part ? part.PartNumber : part.partNumber,
+          );
+          this.validatePartNumbers(completePartNumbers);
+
           return storageManager.completeMultipartUpload({
             uploadId,
             key,
@@ -602,6 +708,13 @@ export class FileRouteHandler {
         case "abort": {
           const abortData = data as MultipartAbortData;
           const { uploadId, key } = abortData;
+
+          if (!uploadId || !key) {
+            throw new UploadError(
+              "INVALID_INPUT",
+              "Multipart uploadId and key are required",
+            );
+          }
 
           await storageManager.abortMultipartUpload({
             uploadId,
@@ -639,8 +752,24 @@ export class FileRouteHandler {
     const uploadResults: UploadResponse[] = [];
 
     try {
+      if (files.length > this.maxFileCount) {
+        throw new UploadError(
+          "TOO_MANY_FILES",
+          `At most ${this.maxFileCount} files are allowed`,
+        );
+      }
       for (const file of files) {
-        const sizeError = validateFileSize(file.size, this.maxFileSize);
+        if (!Buffer.isBuffer(file.buffer) || file.size !== file.buffer.length) {
+          throw new UploadError(
+            "INVALID_FILE",
+            "File data is invalid or its declared size does not match its contents",
+          );
+        }
+        this.validateFileInput(file.name, file.type, file.buffer.length);
+        const sizeError = validateFileSize(
+          file.buffer.length,
+          this.maxFileSize,
+        );
         if (sizeError) {
           throw new UploadError(sizeError.code, sizeError.message, {
             maxSize: this.maxFileSize,
@@ -723,7 +852,11 @@ export class FileRouteHandler {
     const context = this.getContext(contextInput, storageManager);
 
     try {
-      const fileBuffer = await storageManager.download({ key, context });
+      const fileBuffer = await storageManager.download({
+        key,
+        context,
+        maxBytes: this.maxDownloadSize,
+      });
       const filename = sanitizeFilename(key.split("/").pop() || "download");
 
       return {
@@ -732,11 +865,12 @@ export class FileRouteHandler {
         context,
       };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "File could not be served";
+      const message = "File could not be served";
+      const internalMessage =
+        error instanceof Error ? error.message.toLowerCase() : "";
       const status =
-        message.toLowerCase().includes("not found") ||
-        message.toLowerCase().includes("missing")
+        internalMessage.includes("not found") ||
+        internalMessage.includes("missing")
           ? 404
           : 500;
       const uploadError =

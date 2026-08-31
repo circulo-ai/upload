@@ -15,6 +15,10 @@ import type {
   PresignedUrlResponse,
   UploadOptions,
 } from "../types/core";
+import {
+  normalizeStorageKey,
+  sanitizeFilename as sanitizeSafeFilename,
+} from "../utils/security";
 
 /**
  * Base storage provider interface that all providers must implement
@@ -144,11 +148,34 @@ export abstract class BaseStorageProvider implements StorageProvider {
     fileName: string,
     preserveKey: boolean = false,
   ): string {
-    const safeFileName = fileName.replace(/\s+/g, "-");
+    const safeFileName = sanitizeSafeFilename(fileName).replace(/\s+/g, "-");
     if (preserveKey) {
-      return safeFileName;
+      return normalizeStorageKey(safeFileName);
     }
-    return `${Date.now()}-${randomUUID()}-${safeFileName}`;
+    return normalizeStorageKey(`${Date.now()}-${randomUUID()}-${safeFileName}`);
+  }
+
+  /** Normalize caller-provided keys before passing them to a backend. */
+  protected normalizeKey(key: string): string {
+    return normalizeStorageKey(key);
+  }
+
+  /** Keep bearer-style URLs short-lived and reject invalid caller input. */
+  protected normalizeExpirationSeconds(
+    value: number | undefined,
+    defaultValue: number = 3600,
+  ): number {
+    const expiration = value ?? defaultValue;
+    if (
+      !Number.isSafeInteger(expiration) ||
+      expiration < 1 ||
+      expiration > 604_800
+    ) {
+      throw new Error(
+        "URL expiration must be an integer between 1 and 604800 seconds",
+      );
+    }
+    return expiration;
   }
 
   /**
@@ -172,7 +199,8 @@ export abstract class BaseStorageProvider implements StorageProvider {
     maxLength: number = 2000,
   ): Record<string, string> {
     const sanitized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(metadata)) {
+    for (const [key, value] of Object.entries(metadata).slice(0, 100)) {
+      if (!/^[A-Za-z0-9._-]{1,128}$/.test(key)) continue;
       const sanitizedValue = String(value)
         .replace(/[^\x20-\x7E]/g, "")
         .replace(/["\\]/g, "")

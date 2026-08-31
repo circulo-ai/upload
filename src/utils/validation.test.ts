@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  base64ToBuffer,
+  contentDisposition,
+  normalizeStorageKey,
+  sanitizeFilename,
+} from "./security";
+import {
   getMimeTypeFromExtension,
   validateFileSize,
   validateFileType,
@@ -42,5 +48,35 @@ describe("upload validation", () => {
 
   it("provides a safe MIME fallback for browser files without a type", () => {
     expect(getMimeTypeFromExtension("md")).toBe("text/markdown");
+  });
+
+  it("normalizes MIME parameters and case before validating", () => {
+    expect(
+      validateFileType("photo.JPG", "IMAGE/JPEG; charset=binary"),
+    ).toBeNull();
+  });
+
+  it("includes image extensions in unsupported-type guidance", () => {
+    expect(
+      validateFileType("archive.exe", "application/octet-stream")
+        ?.supportedTypes,
+    ).toContain("png");
+  });
+
+  it("rejects ambiguous storage keys instead of rewriting them", () => {
+    expect(() => normalizeStorageKey("../secret.txt")).toThrow();
+    expect(() => normalizeStorageKey("folder\\secret.txt")).toThrow();
+    expect(normalizeStorageKey("folder/file.txt")).toBe("folder/file.txt");
+  });
+
+  it("sanitizes display names and builds injection-safe content disposition", () => {
+    expect(sanitizeFilename("..\\avatar\u0000.png")).toBe("avatar_.png");
+    expect(contentDisposition('report".pdf')).toContain(
+      'filename="report_.pdf"',
+    );
+  });
+
+  it("rejects malformed base64 instead of silently discarding input", () => {
+    expect(() => base64ToBuffer("not base64!")).toThrow("Invalid base64");
   });
 });

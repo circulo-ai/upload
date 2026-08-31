@@ -84,4 +84,34 @@ describe("FileRouterHandler", () => {
       ),
     ).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
   });
+
+  it("rejects files whose declared size does not match the received bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "circulo-router-"));
+    temporaryDirectories.push(directory);
+    const storageManager = new StorageManager({
+      providers: {
+        uploads: new LocalStorageProvider({ basePath: directory }),
+      },
+      defaultContext: "uploads",
+    });
+    const handler = new FileRouterHandler({
+      storageManager,
+      router: { uploader: f({ any: { maxFileCount: 1 } }) },
+    });
+
+    await expect(
+      handler.handleUpload(
+        "uploader",
+        [
+          {
+            buffer: Buffer.from("actual bytes"),
+            name: "file.txt",
+            size: 1,
+            type: "text/plain",
+          },
+        ],
+        new Request("https://example.test/upload"),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_FILE" });
+  });
 });

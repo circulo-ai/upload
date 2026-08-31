@@ -61,6 +61,15 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
   constructor(config: AzureBlobConfig) {
     super();
+    if (!config.containerName.trim()) {
+      throw new Error("Azure container name is required");
+    }
+    if (!config.accountName.trim()) {
+      throw new Error("Azure account name is required");
+    }
+    if (config.pathPrefix) {
+      this.normalizeKey(config.pathPrefix.replace(/^\/+|\/+$/g, ""));
+    }
     this.config = config;
 
     if (config.connectionString) {
@@ -87,11 +96,17 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
    * Get the full key including path prefix
    */
   private getFullKey(key: string): string {
+    const normalizedKey = this.normalizeKey(key);
     if (!this.config.pathPrefix) {
-      return key;
+      return normalizedKey;
     }
-    const prefix = this.config.pathPrefix.replace(/\/$/, "");
-    return `${prefix}/${key}`;
+    const prefix = this.normalizeKey(
+      this.config.pathPrefix.replace(/^\/+|\/+$/g, ""),
+    );
+    if (normalizedKey === prefix || normalizedKey.startsWith(`${prefix}/`)) {
+      return normalizedKey;
+    }
+    return this.normalizeKey(`${prefix}/${normalizedKey}`);
   }
 
   /**
@@ -122,9 +137,9 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     const blobClient = this.getBlobClient(key);
 
     const uploadMetadata: Record<string, string> = {
+      ...metadata,
       originalName: encodeURIComponent(fileName),
       uploadedAt: new Date().toISOString(),
-      ...metadata,
     };
 
     await blobClient.upload(file, file.length, {
@@ -154,7 +169,10 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       throw new Error("Failed to get readable stream from blob");
     }
 
-    return this.streamToBuffer(downloadResponse.readableStreamBody);
+    return this.streamToBuffer(
+      downloadResponse.readableStreamBody,
+      options.maxBytes,
+    );
   }
 
   async delete(options: DeleteOptions): Promise<void> {
@@ -176,18 +194,16 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       throw new Error("Account name and key required for SAS generation");
     }
 
-    const {
-      fileName,
-      contentType,
-      expirationSeconds = 3600,
-      metadata,
-    } = options;
+    const { fileName, contentType, expirationSeconds, metadata } = options;
 
     const key = this.getFullKey(this.generateKey(fileName));
     const blobClient = this.getBlobClient(key);
 
     const startsOn = new Date();
-    const expiresOn = new Date(startsOn.getTime() + expirationSeconds * 1000);
+    const expiresOn = new Date(
+      startsOn.getTime() +
+        this.normalizeExpirationSeconds(expirationSeconds) * 1000,
+    );
 
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
@@ -235,13 +251,16 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       throw new Error("Account name and key required for SAS generation");
     }
 
-    const { key, expirationSeconds = 3600 } = options;
+    const { key, expirationSeconds } = options;
     const fullKey = this.getFullKey(key);
 
     const blobClient = this.getBlobClient(fullKey);
 
     const startsOn = new Date();
-    const expiresOn = new Date(startsOn.getTime() + expirationSeconds * 1000);
+    const expiresOn = new Date(
+      startsOn.getTime() +
+        this.normalizeExpirationSeconds(expirationSeconds) * 1000,
+    );
 
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
@@ -271,31 +290,22 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
   ): Promise<MultipartInitResponse> {
     const { fileName, contentType, metadata } = options;
 
-    const safeFileName = fileName
-      .replace(/\s+/g, "-")
-      .replace(/[^a-zA-Z0-9.-]/g, "_");
+    const key = this.getFullKey(this.generateKey(fileName));
 
-    const key = this.getFullKey(
-      `${Date.now()}-${Math.random()
-        .toString(36)
-        .substring(2, 9)}-${safeFileName}`,
-    );
-
-    // Generate a unique upload ID
-    const uploadId = `${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(2, 15)}`;
+    // This ID is metadata only; use a cryptographically random value so it
+    // cannot be guessed when it appears in logs or client state.
+    const uploadId = this.generateKey("upload");
 
     const blobClient = this.getBlobClient(key);
 
     // Set metadata to track the multipart upload
     const uploadMetadata: Record<string, string> = {
+      ...metadata,
       uploadId,
       fileName: encodeURIComponent(fileName),
       contentType,
       uploadStarted: new Date().toISOString(),
       multipartUpload: "true",
-      ...metadata,
     };
 
     await blobClient.setMetadata(this.sanitizeMetadata(uploadMetadata, 8000));
@@ -410,14 +420,33 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
    */
   private streamToBuffer(
     readableStream: NodeJS.ReadableStream,
+    maxBytes?: number,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      let settled = false;
       readableStream.on("data", (data) => {
-        chunks.push(data instanceof Buffer ? data : Buffer.from(data));
+        const buffer = data instanceof Buffer ? data : Buffer.from(data);
+        totalBytes += buffer.length;
+        if (maxBytes !== undefined && totalBytes > maxBytes) {
+          settled = true;
+          (
+            readableStream as NodeJS.ReadableStream & {
+              destroy?: (error?: Error) => void;
+            }
+          ).destroy?.(new Error("File exceeds the configured download limit"));
+          reject(new Error("File exceeds the configured download limit"));
+          return;
+        }
+        chunks.push(buffer);
       });
-      readableStream.on("end", () => resolve(Buffer.concat(chunks)));
-      readableStream.on("error", reject);
+      readableStream.on("end", () => {
+        if (!settled) resolve(Buffer.concat(chunks));
+      });
+      readableStream.on("error", (error) => {
+        if (!settled) reject(error);
+      });
     });
   }
 }

@@ -99,7 +99,8 @@ export class FileRouterHandler<TRouter extends FileRouter> {
     }
 
     for (const file of files) {
-      const rule = getFileRouteRule(route.config, file.type);
+      const contentType = file.type.split(";", 1)[0]?.trim().toLowerCase();
+      const rule = getFileRouteRule(route.config, contentType);
       if (rule.maxFileCount !== undefined && files.length > rule.maxFileCount) {
         throw new UploadError(
           "TOO_MANY_FILES",
@@ -108,10 +109,16 @@ export class FileRouterHandler<TRouter extends FileRouter> {
           400,
         );
       }
-      if (rule.allowedMimeTypes && !rule.allowedMimeTypes.includes(file.type)) {
+      if (
+        rule.allowedMimeTypes &&
+        !rule.allowedMimeTypes.some(
+          (allowed) =>
+            allowed.split(";", 1)[0]?.trim().toLowerCase() === contentType,
+        )
+      ) {
         throw new UploadError(
           "UNSUPPORTED_FILE_TYPE",
-          `File type '${file.type}' is not allowed for this endpoint`,
+          `File type '${contentType}' is not allowed for this endpoint`,
           { allowedMimeTypes: rule.allowedMimeTypes },
           400,
         );

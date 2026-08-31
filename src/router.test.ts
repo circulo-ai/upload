@@ -31,4 +31,25 @@ describe("file router", () => {
 
     expect(completed).toEqual(["user-1:avatar.png"]);
   });
+
+  it("applies the documented any-rule fallback before global limits", () => {
+    const config = {
+      maxFileSize: "10MB",
+      any: { maxFileSize: "2MB", maxFileCount: 2 },
+      image: { allowedMimeTypes: ["image/png"] },
+    };
+    expect(getFileRouteRule(config, "image/png")).toMatchObject({
+      maxFileSize: "2MB",
+      maxFileCount: 2,
+    });
+  });
+
+  it("rejects invalid route limits early", () => {
+    expect(() => f({ image: { maxFileSize: "0MB" } })).toThrow(
+      "Invalid file size",
+    );
+    expect(() => f({ image: { maxFileCount: 0 } })).toThrow(
+      "Invalid maxFileCount",
+    );
+  });
 });

@@ -131,11 +131,10 @@ export class FtpStorageProvider extends BaseStorageProvider {
   }
 
   private getFullKey(key: string): string {
-    const normalizedKey = normalizeRemotePath(key).replace(/^\/+/, "");
-    const prefix = normalizeRemotePath(this.config.pathPrefix ?? "").replace(
-      /^\/+|\/+$/g,
-      "",
-    );
+    const normalizedKey = this.normalizeKey(key);
+    const prefix = this.config.pathPrefix
+      ? this.normalizeKey(this.config.pathPrefix.replace(/^\/+|\/+$/g, ""))
+      : "";
 
     if (
       !prefix ||
@@ -210,9 +209,18 @@ export class FtpStorageProvider extends BaseStorageProvider {
     const remotePath = this.getRemotePath(options.key);
     const destination = new PassThrough();
     const chunks: Buffer[] = [];
+    let totalBytes = 0;
     const downloadComplete = new Promise<Buffer>((resolve, reject) => {
       destination.on("data", (chunk: Buffer | Uint8Array | string) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        totalBytes += buffer.length;
+        if (options.maxBytes !== undefined && totalBytes > options.maxBytes) {
+          destination.destroy(
+            new Error("File exceeds the configured download limit"),
+          );
+          return;
+        }
+        chunks.push(buffer);
       });
       destination.once("end", () => resolve(Buffer.concat(chunks)));
       destination.once("error", reject);

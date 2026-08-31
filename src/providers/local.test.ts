@@ -35,4 +35,34 @@ describe("LocalStorageProvider", () => {
     );
     expect(await readFile(join(directory, uploaded.key), "utf8")).toBe("hello");
   });
+
+  it("rejects traversal keys instead of sanitizing them into a different file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "circulo-upload-"));
+    temporaryDirectories.push(directory);
+    const provider = new LocalStorageProvider({ basePath: directory });
+
+    await expect(
+      provider.upload({
+        file: Buffer.from("blocked"),
+        fileName: "safe.txt",
+        contentType: "text/plain",
+        customKey: "../outside.txt",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("enforces an optional buffered download limit before reading", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "circulo-upload-"));
+    temporaryDirectories.push(directory);
+    const provider = new LocalStorageProvider({ basePath: directory });
+    const uploaded = await provider.upload({
+      file: Buffer.from("too large"),
+      fileName: "file.txt",
+      contentType: "text/plain",
+    });
+
+    await expect(
+      provider.download({ key: uploaded.key, maxBytes: 1 }),
+    ).rejects.toThrow("download limit");
+  });
 });

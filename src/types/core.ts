@@ -50,6 +50,8 @@ export interface UploadOptions {
 export interface DownloadOptions {
   /** Storage key to download */
   key: string;
+  /** Optional upper bound for buffered downloads, in bytes */
+  maxBytes?: number;
 }
 
 /**

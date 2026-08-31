@@ -1,5 +1,12 @@
+export const MAX_STORAGE_KEY_LENGTH = 1_024;
+export const MAX_FILENAME_LENGTH = 255;
+
 /**
- * Sanitize filename for safe storage
+ * Return a safe, display-oriented filename.
+ *
+ * This intentionally keeps the basename only. A filename is not a storage
+ * path, and accepting path separators here makes it too easy for a caller to
+ * accidentally turn user input into a directory traversal primitive.
  */
 export function sanitizeFilename(filename: string): string {
   if (!filename || typeof filename !== "string") {
@@ -7,10 +14,12 @@ export function sanitizeFilename(filename: string): string {
   }
 
   const sanitized = filename
-    .replace(/\.\./g, "") // Remove path traversal
-    .replace(/[/\\]/g, "") // Remove path separators
-    .replace(/^\./g, "") // Remove leading dots
-    .replace(/[<>:"|?*\x00-\x1F]/g, "_") // Replace invalid characters
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[\x00-\x1F\x7F]/g, "_")
+    .replace(/[<>:"|?*]/g, "_")
+    .replace(/^\.+/, "")
+    .slice(0, MAX_FILENAME_LENGTH)
     .trim();
 
   if (!sanitized || sanitized.length === 0) {
@@ -18,6 +27,56 @@ export function sanitizeFilename(filename: string): string {
   }
 
   return sanitized;
+}
+
+/**
+ * Validate and normalize a provider key.
+ *
+ * Storage keys may contain nested directories, but never absolute paths,
+ * parent-directory segments, control characters, or backslashes. Rejecting
+ * invalid keys (rather than silently rewriting them) avoids collisions and
+ * makes authorization decisions deterministic across providers.
+ */
+export function normalizeStorageKey(key: string): string {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new Error("Storage key is required");
+  }
+  if (key.length > MAX_STORAGE_KEY_LENGTH) {
+    throw new Error("Storage key is too long");
+  }
+  if (key.startsWith("/") || key.includes("\\")) {
+    throw new Error("Storage keys must be relative POSIX paths");
+  }
+  if (/[\x00-\x1F\x7F]/.test(key)) {
+    throw new Error("Storage keys must not contain control characters");
+  }
+
+  const segments = key.split("/");
+  if (
+    segments.some(
+      (segment) => segment.length === 0 || segment === "." || segment === "..",
+    )
+  ) {
+    throw new Error(
+      "Storage keys must not contain empty or parent-directory segments",
+    );
+  }
+
+  return segments.join("/");
+}
+
+/**
+ * Build a Content-Disposition value without allowing header injection.
+ */
+export function contentDisposition(
+  filename: string,
+  disposition: "inline" | "attachment" = "attachment",
+): string {
+  const safeName = sanitizeFilename(filename);
+  const asciiName = safeName
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/['\\]/g, "_");
+  return `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
 }
 
 /**
@@ -43,5 +102,12 @@ export function bufferToBase64(buffer: Buffer): string {
  * Convert base64 to buffer
  */
 export function base64ToBuffer(base64: string): Buffer {
+  if (
+    typeof base64 !== "string" ||
+    base64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
+  ) {
+    throw new Error("Invalid base64 input");
+  }
   return Buffer.from(base64, "base64");
 }

@@ -1,7 +1,11 @@
-import { z } from "zod";
+import * as z from "zod";
 import type { FileRouter } from "../router";
 import { UploadError } from "../utils/errors";
-import { getContentType } from "../utils/validation";
+import { contentDisposition } from "../utils/security";
+import {
+  getFileExtension,
+  getMimeTypeFromExtension,
+} from "../utils/validation";
 import {
   FileRouteHandler,
   type FileHandlerConfig,
@@ -56,6 +60,10 @@ export interface NextFileRoutesOptions<Req extends Request = Request> {
    * Catch-all param name to read from Next.js route context. Defaults to "path".
    */
   pathParam?: string;
+  /** Content-Disposition for server-served files. Defaults to attachment. */
+  serveContentDisposition?: "inline" | "attachment";
+  /** Cache-Control for server-served files. Defaults to private, no-store. */
+  serveCacheControl?: string;
   routes?: {
     delete?: NextRouteConfig<Req>;
     download?: NextRouteConfig<Req>;
@@ -88,12 +96,12 @@ function isFileBlob(value: unknown): value is FileBlob {
 }
 
 const deleteSchema = z.object({
-  key: z.string(),
+  key: z.string().min(1),
   context: z.string().optional(),
 });
 
 const downloadSchema = z.object({
-  key: z.string(),
+  key: z.string().min(1),
   name: z.string().optional(),
   context: z.string().optional(),
 });
@@ -101,14 +109,14 @@ const downloadSchema = z.object({
 const presignedSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1),
-  fileSize: z.number().positive(),
+  fileSize: z.number().finite().int().positive().safe(),
   input: z.unknown().optional(),
 });
 
 const batchFileSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1),
-  fileSize: z.number().positive(),
+  fileSize: z.number().finite().int().positive().safe(),
 });
 
 const batchSchema = z.object({
@@ -119,7 +127,7 @@ const batchSchema = z.object({
 const multipartInitiateSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1),
-  fileSize: z.number().positive(),
+  fileSize: z.number().finite().int().positive().safe(),
   context: z.string().optional(),
   metadata: z.record(z.string(), z.string()).optional(),
 });
@@ -127,7 +135,10 @@ const multipartInitiateSchema = z.object({
 const multipartGetPartUrlsSchema = z.object({
   uploadId: z.string().min(1),
   key: z.string().min(1),
-  partNumbers: z.array(z.number().int().positive()).min(1),
+  partNumbers: z
+    .array(z.number().finite().int().positive().safe())
+    .min(1)
+    .max(10_000),
   context: z.string().optional(),
 });
 
@@ -135,12 +146,12 @@ const partsSchema = z
   .array(
     z.union([
       z.object({
-        PartNumber: z.number().int().positive(),
+        PartNumber: z.number().finite().int().positive().safe(),
         ETag: z.string().min(1),
       }),
       z.object({
         blockId: z.string().min(1),
-        partNumber: z.number().int().positive(),
+        partNumber: z.number().finite().int().positive().safe(),
       }),
     ]),
   )
@@ -580,8 +591,9 @@ export function createNextFileHandler<Req extends Request = Request>(
             contextParam ?? undefined,
           );
 
-          const contentType =
-            getContentType(filename) ?? "application/octet-stream";
+          const contentType = getMimeTypeFromExtension(
+            getFileExtension(filename),
+          );
 
           if (req.method === "HEAD") {
             return new Response(null, {
@@ -589,8 +601,13 @@ export function createNextFileHandler<Req extends Request = Request>(
               headers: {
                 "Content-Length": fileBuffer.byteLength.toString(),
                 "Content-Type": contentType,
-                "Content-Disposition": `inline; filename="${filename}"`,
-                "Cache-Control": "public, max-age=31536000",
+                "Content-Disposition": contentDisposition(
+                  filename,
+                  options.serveContentDisposition,
+                ),
+                "Cache-Control":
+                  options.serveCacheControl ?? "private, no-store",
+                "Content-Security-Policy": "sandbox",
                 "X-Content-Type-Options": "nosniff",
               },
             });
@@ -600,8 +617,12 @@ export function createNextFileHandler<Req extends Request = Request>(
             status: 200,
             headers: {
               "Content-Type": contentType,
-              "Content-Disposition": `inline; filename="${filename}"`,
-              "Cache-Control": "public, max-age=31536000",
+              "Content-Disposition": contentDisposition(
+                filename,
+                options.serveContentDisposition,
+              ),
+              "Cache-Control": options.serveCacheControl ?? "private, no-store",
+              "Content-Security-Policy": "sandbox",
               "X-Content-Type-Options": "nosniff",
             },
           });
@@ -628,18 +649,25 @@ export function createNextFileHandler<Req extends Request = Request>(
         return json({ error: "Unauthorized" }, 401);
       }
 
-      const message =
-        error instanceof Error ? error.message : "Internal server error";
       const status =
         routeInfo.route === "serve"
           ? 404
           : error instanceof Error &&
-              (message.toLowerCase().includes("not found") ||
-                message.toLowerCase().includes("missing"))
+              (error.message.toLowerCase().includes("not found") ||
+                error.message.toLowerCase().includes("missing"))
             ? 404
             : 500;
 
-      return json({ error: message }, status);
+      return json(
+        {
+          error:
+            routeInfo.route === "serve"
+              ? "File not found"
+              : "Internal server error",
+          code: "INTERNAL_ERROR",
+        },
+        status,
+      );
     }
   };
 }

@@ -8,6 +8,9 @@ export type UploadErrorCode =
   | "FILE_TOO_LARGE"
   | "UNSUPPORTED_FILE_TYPE"
   | "MIME_TYPE_MISMATCH"
+  | "INVALID_INPUT"
+  | "INVALID_FILE"
+  | "UNAUTHORIZED"
   | "PROVIDER_UNSUPPORTED"
   | "PROVIDER_UNSUPPORTED_MULTIPART"
   | "NOT_FOUND"
@@ -26,8 +29,9 @@ export class UploadError extends Error {
     status: number = 400,
   ) {
     super(message);
+    this.name = "UploadError";
     this.code = code;
-    this.status = status;
+    this.status = Math.min(599, Math.max(400, Math.trunc(status)));
     this.details = details;
   }
 }

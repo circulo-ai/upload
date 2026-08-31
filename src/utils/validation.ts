@@ -160,14 +160,15 @@ export const SUPPORTED_VIDEO_MIME_TYPES: Record<
  * Get content type for a MIME type
  */
 export function getContentType(mimeType: string): ContentType | null {
-  return MIME_TYPE_MAPPING[mimeType.toLowerCase()] || null;
+  const baseMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase();
+  return baseMimeType ? MIME_TYPE_MAPPING[baseMimeType] || null : null;
 }
 
 /**
  * Check if a MIME type is supported
  */
 export function isSupportedMimeType(mimeType: string): boolean {
-  return mimeType.toLowerCase() in MIME_TYPE_MAPPING;
+  return getContentType(mimeType) !== null;
 }
 
 /**
@@ -235,7 +236,7 @@ export function validateFileType(
   mimeType: string,
 ): FileValidationError | null {
   const extension = getFileExtension(fileName) as SupportedMediaExtension;
-  const baseMimeType = mimeType.split(";")[0]?.trim();
+  const baseMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase();
 
   if (!baseMimeType) {
     return {
@@ -313,6 +314,7 @@ export function validateFileType(
     code: "UNSUPPORTED_FILE_TYPE",
     message: `Unsupported file type: ${extension}`,
     supportedTypes: [
+      ...Object.keys(SUPPORTED_IMAGE_MIME_TYPES),
       ...Object.keys(SUPPORTED_MIME_TYPES),
       ...Object.keys(SUPPORTED_AUDIO_MIME_TYPES),
       ...Object.keys(SUPPORTED_VIDEO_MIME_TYPES),
@@ -327,6 +329,18 @@ export function validateFileSize(
   fileSize: number,
   maxSize: typeof MAX_FILE_SIZE = 100 * 1024 * 1024,
 ): FileValidationError | null {
+  if (!Number.isSafeInteger(fileSize) || fileSize < 0) {
+    return {
+      code: "FILE_TOO_LARGE",
+      message: "File size must be a non-negative safe integer",
+      supportedTypes: [],
+    };
+  }
+  if (!Number.isSafeInteger(maxSize) || maxSize < 0) {
+    throw new TypeError(
+      "Maximum file size must be a non-negative safe integer",
+    );
+  }
   if (fileSize > maxSize) {
     return {
       code: "FILE_TOO_LARGE",
@@ -341,11 +355,15 @@ export function validateFileSize(
  * Format bytes to human-readable size
  */
 export function formatFileSize(bytes: number, precision: number = 1): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "Invalid size";
   if (bytes === 0) return "0 Bytes";
 
   const k = 1024;
   const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const i = Math.min(
+    sizes.length - 1,
+    Math.floor(Math.log(bytes) / Math.log(k)),
+  );
 
   const value = bytes / Math.pow(k, i);
   const formattedValue = Number.parseFloat(value.toFixed(precision));

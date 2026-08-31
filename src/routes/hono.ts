@@ -1,9 +1,13 @@
 import { Hono, type Context, type Env, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { z } from "zod";
+import * as z from "zod";
 import type { FileRouter } from "../router";
 import { UploadError } from "../utils/errors";
-import { getContentType } from "../utils/validation";
+import { contentDisposition } from "../utils/security";
+import {
+  getFileExtension,
+  getMimeTypeFromExtension,
+} from "../utils/validation";
 import {
   FileRouteHandler,
   type FileHandlerConfig,
@@ -26,6 +30,10 @@ export interface HonoFileRoutesOptions<E extends Env = Env> {
   getUploadMetadata?: (
     c: Context<E>,
   ) => Promise<Record<string, string>> | Record<string, string>;
+  /** Content-Disposition for server-served files. Defaults to attachment. */
+  serveContentDisposition?: "inline" | "attachment";
+  /** Cache-Control for server-served files. Defaults to private, no-store. */
+  serveCacheControl?: string;
 
   routes?: {
     delete?: RouteConfig<E>;
@@ -138,10 +146,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
             status,
           );
         }
-        return c.json(
-          { error: error instanceof Error ? error.message : "Delete failed" },
-          500,
-        );
+        return c.json({ error: "Delete failed", code: "INTERNAL_ERROR" }, 500);
       }
     });
   }
@@ -149,7 +154,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
   // DOWNLOAD (manual zod parse -> no valid("json") bug)
   if (isEnabled("download")) {
     const downloadSchema = z.object({
-      key: z.string(),
+      key: z.string().min(1),
       name: z.string().optional(),
       context: z.string().optional(),
     });
@@ -173,9 +178,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
           );
         }
         return c.json(
-          {
-            error: error instanceof Error ? error.message : "Download failed",
-          },
+          { error: "Download failed", code: "INTERNAL_ERROR" },
           500,
         );
       }
@@ -187,7 +190,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
     const presignedSchema = z.object({
       fileName: z.string().min(1),
       contentType: z.string().min(1),
-      fileSize: z.number().positive(),
+      fileSize: z.number().finite().int().positive().safe(),
       input: z.unknown().optional(),
     });
 
@@ -230,8 +233,8 @@ export function createHonoFileRoutes<E extends Env = Env>(
         }
         return c.json(
           {
-            error:
-              error instanceof Error ? error.message : "Failed to generate URL",
+            error: "Failed to generate URL",
+            code: "INTERNAL_ERROR",
           },
           500,
         );
@@ -244,7 +247,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
     const batchFileSchema = z.object({
       fileName: z.string().min(1),
       contentType: z.string().min(1),
-      fileSize: z.number().positive(),
+      fileSize: z.number().finite().int().positive().safe(),
     });
 
     const batchSchema = z.object({
@@ -293,10 +296,8 @@ export function createHonoFileRoutes<E extends Env = Env>(
         }
         return c.json(
           {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to generate batch URLs",
+            error: "Failed to generate batch URLs",
+            code: "INTERNAL_ERROR",
           },
           500,
         );
@@ -310,7 +311,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
     const multipartInitiateSchema = z.object({
       fileName: z.string().min(1),
       contentType: z.string().min(1),
-      fileSize: z.number().positive(),
+      fileSize: z.number().finite().int().positive().safe(),
       context: z.string().optional(),
       metadata: z.record(z.string(), z.string()).optional(),
     });
@@ -318,7 +319,10 @@ export function createHonoFileRoutes<E extends Env = Env>(
     const multipartGetPartUrlsSchema = z.object({
       uploadId: z.string().min(1),
       key: z.string().min(1),
-      partNumbers: z.array(z.number().int().positive()).min(1),
+      partNumbers: z
+        .array(z.number().finite().int().positive().safe())
+        .min(1)
+        .max(10_000),
       context: z.string().optional(),
     });
 
@@ -326,12 +330,12 @@ export function createHonoFileRoutes<E extends Env = Env>(
       .array(
         z.union([
           z.object({
-            PartNumber: z.number().int().positive(),
+            PartNumber: z.number().finite().int().positive().safe(),
             ETag: z.string().min(1),
           }),
           z.object({
             blockId: z.string().min(1),
-            partNumber: z.number().int().positive(),
+            partNumber: z.number().finite().int().positive().safe(),
           }),
         ]),
       )
@@ -431,10 +435,8 @@ export function createHonoFileRoutes<E extends Env = Env>(
         }
         return c.json(
           {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Multipart operation failed",
+            error: "Multipart operation failed",
+            code: "INTERNAL_ERROR",
           },
           500,
         );
@@ -501,10 +503,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
         if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
         }
-        return c.json(
-          { error: error instanceof Error ? error.message : "Upload failed" },
-          500,
-        );
+        return c.json({ error: "Upload failed", code: "INTERNAL_ERROR" }, 500);
       }
     });
   }
@@ -542,9 +541,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
           );
         }
         return c.json(
-          {
-            error: error instanceof Error ? error.message : "Completion failed",
-          },
+          { error: "Completion failed", code: "INTERNAL_ERROR" },
           500,
         );
       }
@@ -587,8 +584,9 @@ export function createHonoFileRoutes<E extends Env = Env>(
           context,
         );
 
-        const contentType =
-          getContentType(filename) ?? "application/octet-stream";
+        const contentType = getMimeTypeFromExtension(
+          getFileExtension(filename),
+        );
 
         return new Response(
           method === "HEAD" ? null : (fileBuffer as unknown as BodyInit),
@@ -596,8 +594,12 @@ export function createHonoFileRoutes<E extends Env = Env>(
             status: 200,
             headers: {
               "Content-Type": contentType,
-              "Content-Disposition": `inline; filename="${filename}"`,
-              "Cache-Control": "public, max-age=31536000",
+              "Content-Disposition": contentDisposition(
+                filename,
+                options.serveContentDisposition,
+              ),
+              "Cache-Control": options.serveCacheControl ?? "private, no-store",
+              "Content-Security-Policy": "sandbox",
               "X-Content-Type-Options": "nosniff",
               ...(method === "HEAD"
                 ? { "Content-Length": fileBuffer.byteLength.toString() }
@@ -613,10 +615,7 @@ export function createHonoFileRoutes<E extends Env = Env>(
             status,
           );
         }
-        return c.json(
-          { error: error instanceof Error ? error.message : "File not found" },
-          404,
-        );
+        return c.json({ error: "File not found", code: "INTERNAL_ERROR" }, 404);
       }
     });
   }

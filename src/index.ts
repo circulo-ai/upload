@@ -123,9 +123,13 @@ export {
 
 export { UploadError, type UploadErrorCode } from "./utils/errors";
 export {
+  MAX_FILENAME_LENGTH,
+  MAX_STORAGE_KEY_LENGTH,
   base64ToBuffer,
   bufferToBase64,
+  contentDisposition,
   isValidUrl,
+  normalizeStorageKey,
   sanitizeFilename,
 } from "./utils/security";
 

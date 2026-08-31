@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -22,6 +23,26 @@ export interface UploadClientOptions {
   url?: string | URL;
   fetcher?: typeof fetch;
   headers?: HeadersInit | (() => HeadersInit);
+}
+
+/** Error returned by a client-side upload request. */
+export class UploadClientError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly details?: unknown;
+
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    details?: unknown,
+  ) {
+    super(message);
+    this.name = "UploadClientError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
 }
 
 export interface UploadFilesOptions<TInput = unknown> {
@@ -72,6 +93,9 @@ export interface UploadButtonProps<TRouter extends FileRouter> extends Omit<
     | FileRouterEndpoint<TRouter>
     | ((router: TRouter) => FileRouterEndpoint<TRouter>);
   input?: unknown;
+  context?: string;
+  headers?: HeadersInit | (() => HeadersInit);
+  signal?: AbortSignal;
   onClientUploadComplete?: (files: FileRouterCompletionFile[]) => void;
   onUploadError?: (error: Error) => void;
   onUploadProgress?: (progress: number) => void;
@@ -91,6 +115,10 @@ export interface UploadDropzoneProps<TRouter extends FileRouter> extends Omit<
   onUploadError?: (error: Error) => void;
   onUploadProgress?: (progress: number) => void;
   onDrop?: (files: File[]) => void;
+  onUploadBegin?: (fileName: string) => void;
+  context?: string;
+  headers?: HeadersInit | (() => HeadersInit);
+  signal?: AbortSignal;
   children?: ReactNode;
 }
 
@@ -127,15 +155,38 @@ function mergeHeaders(
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T & { error?: string };
-  if (!response.ok)
-    throw new Error(body.error || `Upload request failed (${response.status})`);
+  let body: (T & { error?: unknown; code?: string; details?: unknown }) | null;
+  try {
+    body = (await response.json()) as T & {
+      error?: unknown;
+      code?: string;
+      details?: unknown;
+    };
+  } catch {
+    throw new UploadClientError(
+      `Upload request failed (${response.status})`,
+      response.status,
+    );
+  }
+  if (!response.ok) {
+    const message =
+      typeof body?.error === "string"
+        ? body.error
+        : `Upload request failed (${response.status})`;
+    throw new UploadClientError(
+      message,
+      response.status,
+      body?.code,
+      body?.details,
+    );
+  }
   return body;
 }
 
 function responseToUpload(
   file: File,
   presigned: PresignedResponse,
+  context?: string,
 ): UploadResponse {
   const now = new Date();
   return {
@@ -149,7 +200,7 @@ function responseToUpload(
     downloadUrl: presigned.downloadUrl,
     uploadedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-    context: "",
+    context: context ?? "",
   };
 }
 
@@ -229,6 +280,13 @@ export function createUploadHelpers<TRouter extends FileRouter>(
 
     let uploaded: UploadResponse[];
     if (presignedResponse.directUploadSupported) {
+      if (presignedResponse.files.length !== files.length) {
+        throw new UploadClientError(
+          "The server returned an incomplete presigned upload plan",
+          502,
+          "INVALID_RESPONSE",
+        );
+      }
       uploaded = [];
       for (const [index, presigned] of presignedResponse.files.entries()) {
         const file = files[index];
@@ -248,7 +306,7 @@ export function createUploadHelpers<TRouter extends FileRouter>(
           Math.round(((index + 1) / files.length) * 100),
           file,
         );
-        uploaded.push(responseToUpload(file, presigned));
+        uploaded.push(responseToUpload(file, presigned, options.context));
       }
     } else {
       const formData = new FormData();
@@ -299,6 +357,12 @@ export function createUploadHelpers<TRouter extends FileRouter>(
     const [error, setError] = useState<Error | null>(null);
     const mounted = useRef(true);
 
+    useEffect(() => {
+      return () => {
+        mounted.current = false;
+      };
+    }, []);
+
     const reset = useCallback(() => {
       setProgress(0);
       setError(null);
@@ -330,7 +394,7 @@ export function createUploadHelpers<TRouter extends FileRouter>(
           if (mounted.current) setIsUploading(false);
         }
       },
-      [endpointArg, options],
+      [endpointArg, options, uploadFiles],
     );
 
     return { startUpload, isUploading, progress, error, reset };
@@ -350,6 +414,9 @@ export function generateUploadButton<TRouter extends FileRouter>(
   return function UploadButton({
     endpoint,
     input,
+    context,
+    headers,
+    signal,
     onClientUploadComplete,
     onUploadError,
     onUploadProgress,
@@ -361,7 +428,7 @@ export function generateUploadButton<TRouter extends FileRouter>(
     const inputRef = useRef<HTMLInputElement>(null);
     const { uploadFiles } = useMemo(
       () => createUploadHelpers(router, options),
-      [],
+      [router, options],
     );
     const [isUploading, setIsUploading] = useState(false);
 
@@ -372,6 +439,9 @@ export function generateUploadButton<TRouter extends FileRouter>(
       try {
         const result = await uploadFiles(endpoint, files, {
           input,
+          context,
+          headers,
+          signal,
           onUploadBegin,
           onUploadProgress: (value) => onUploadProgress?.(value),
         });
@@ -416,9 +486,13 @@ export function generateUploadDropzone<TRouter extends FileRouter>(
   return function UploadDropzone({
     endpoint,
     input,
+    context,
+    headers,
+    signal,
     onClientUploadComplete,
     onUploadError,
     onUploadProgress,
+    onUploadBegin,
     onDrop,
     children = "Drop files here or click to browse",
     disabled,
@@ -429,7 +503,7 @@ export function generateUploadDropzone<TRouter extends FileRouter>(
     const [isUploading, setIsUploading] = useState(false);
     const { uploadFiles } = useMemo(
       () => createUploadHelpers(router, options),
-      [],
+      [router, options],
     );
 
     const upload = async (files: File[]) => {
@@ -439,6 +513,10 @@ export function generateUploadDropzone<TRouter extends FileRouter>(
       try {
         const result = await uploadFiles(endpoint, files, {
           input,
+          context,
+          headers,
+          signal,
+          onUploadBegin,
           onUploadProgress: (value) => onUploadProgress?.(value),
         });
         onClientUploadComplete?.(result);

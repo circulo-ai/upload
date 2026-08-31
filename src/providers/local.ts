@@ -1,4 +1,14 @@
-import { access, mkdir, readFile, unlink, writeFile } from "fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join, resolve, sep } from "path";
 import type {
   DeleteOptions,
@@ -33,28 +43,24 @@ export class LocalStorageProvider extends BaseStorageProvider {
 
     // Resolve to absolute path
     this.fullBasePath = resolve(config.basePath);
-
-    // Ensure base directory exists
-    this.ensureDirectory(this.fullBasePath).catch((error) => {
-      console.error("Failed to create base directory:", error);
-    });
   }
 
   /**
    * Get the full key including path prefix
    */
   private getFullKey(key: string): string {
+    const normalizedKey = this.normalizeKey(key);
     if (!this.config.pathPrefix) {
-      return key;
+      return normalizedKey;
     }
-    const prefix = this.config.pathPrefix.replace(/\/$/, "");
+    const prefix = this.normalizeKey(this.config.pathPrefix.replace(/\/$/, ""));
     // StorageManager passes the provider's returned key back to download and
     // delete. Treat already-prefixed keys as canonical so context prefixes are
     // not duplicated (for example, `chat/chat/file.jpg`).
-    if (key === prefix || key.startsWith(`${prefix}/`)) {
-      return key;
+    if (normalizedKey === prefix || normalizedKey.startsWith(`${prefix}/`)) {
+      return normalizedKey;
     }
-    return `${prefix}/${key}`;
+    return this.normalizeKey(`${prefix}/${normalizedKey}`);
   }
 
   /**
@@ -69,17 +75,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
    * Sanitize key to prevent path traversal
    */
   private sanitizeKey(key: string): string {
-    // Remove path traversal attempts
-    const sanitized = key
-      .replace(/\.\./g, "")
-      .replace(/^\/+/, "")
-      .replace(/[<>:"|?*\x00-\x1F]/g, "_");
-
-    if (!sanitized || sanitized.trim().length === 0) {
-      throw new Error("Invalid or empty key after sanitization");
-    }
-
-    return sanitized;
+    return this.normalizeKey(key);
   }
 
   /**
@@ -107,6 +103,11 @@ export class LocalStorageProvider extends BaseStorageProvider {
     }
   }
 
+  private async validateRealPath(filePath: string): Promise<void> {
+    const resolvedPath = await realpath(filePath);
+    this.validatePath(resolvedPath);
+  }
+
   /**
    * Get serve URL for a file
    */
@@ -127,9 +128,18 @@ export class LocalStorageProvider extends BaseStorageProvider {
 
     // Ensure parent directory exists
     await this.ensureDirectory(dirname(filePath));
+    await this.validateRealPath(dirname(filePath));
 
-    // Write file
-    await writeFile(filePath, file);
+    // Write to a unique private temporary file and atomically rename it. This
+    // prevents partial files from being served after interrupted writes.
+    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, file, { flag: "wx", mode: 0o600 });
+    try {
+      await rename(temporaryPath, filePath);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
 
     return {
       path: this.getServePath(key),
@@ -148,6 +158,13 @@ export class LocalStorageProvider extends BaseStorageProvider {
     this.validatePath(filePath);
 
     try {
+      await this.validateRealPath(filePath);
+      if (options.maxBytes !== undefined) {
+        const fileStats = await stat(filePath);
+        if (fileStats.size > options.maxBytes) {
+          throw new Error("File exceeds the configured download limit");
+        }
+      }
       return await readFile(filePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -165,6 +182,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
     this.validatePath(filePath);
 
     try {
+      await this.validateRealPath(filePath);
       await unlink(filePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
