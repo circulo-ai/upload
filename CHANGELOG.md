@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0
+
+### Minor Changes
+
+- bd08de9: Harden upload keys, local storage writes, multipart validation, presigned URL lifetimes, served-file headers, and client error handling. Expand the package README with the production security model, provider capabilities, route API, and deployment checklist.
+
 ## 1.6.0
 
 ### Minor Changes
