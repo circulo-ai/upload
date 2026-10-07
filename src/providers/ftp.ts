@@ -1,11 +1,20 @@
-import { Client, type AccessOptions } from "basic-ftp";
 import { PassThrough, Readable, type Writable } from "node:stream";
+import type { ConnectionOptions } from "node:tls";
 import type {
   DeleteOptions,
   DownloadOptions,
   FileInfo,
   UploadOptions,
 } from "../types/core";
+import { MAX_FILE_SIZE } from "../types/core";
+import { bufferStream } from "../utils/bounded-stream";
+import { UploadError } from "../utils/errors";
+import { optionalDependency } from "../utils/optional-dependency";
+import {
+  assertByteSize,
+  assertContentType,
+  assertWriteMode,
+} from "../utils/storage-validation";
 import { BaseStorageProvider } from "./base";
 
 /**
@@ -21,7 +30,7 @@ export interface FtpAccessOptions {
   user: string;
   password: string;
   secure?: boolean | "implicit";
-  secureOptions?: AccessOptions["secureOptions"];
+  secureOptions?: ConnectionOptions;
 }
 
 /**
@@ -60,7 +69,7 @@ export interface FtpConfig {
   /** Enable explicit FTPS or use implicit FTPS. */
   secure?: boolean | "implicit";
   /** TLS options used when secure mode is enabled. */
-  secureOptions?: AccessOptions["secureOptions"];
+  secureOptions?: ConnectionOptions;
   /** Root directory used for all files stored by this provider. */
   rootDirectory?: string;
   /** Optional path prefix within the root directory. */
@@ -81,6 +90,8 @@ function createBasicFtpClient({
   timeout,
   verbose,
 }: FtpClientFactoryOptions): FtpClient {
+  const { Client } =
+    optionalDependency<typeof import("basic-ftp")>("basic-ftp");
   const client = new Client(timeout);
   client.ftp.verbose = verbose;
 
@@ -181,7 +192,14 @@ export class FtpStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async upload(options: UploadOptions): Promise<FileInfo> {
+  override async upload(options: UploadOptions): Promise<FileInfo> {
+    assertWriteMode(options.writeMode);
+    assertContentType(options.contentType);
+    if (options.writeMode === "create-only")
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support create-only writes",
+      );
     const { file, fileName, contentType, preserveKey, customKey } = options;
     const key = this.getFullKey(
       customKey || this.generateKey(fileName, preserveKey),
@@ -205,40 +223,38 @@ export class FtpStorageProvider extends BaseStorageProvider {
     };
   }
 
-  async download(options: DownloadOptions): Promise<Buffer> {
+  override async download(options: DownloadOptions): Promise<Buffer> {
+    if (options.range)
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support range reads",
+      );
+    if (options.maxBytes !== undefined)
+      assertByteSize(options.maxBytes, "Download limit");
     const remotePath = this.getRemotePath(options.key);
     const destination = new PassThrough();
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    const downloadComplete = new Promise<Buffer>((resolve, reject) => {
-      destination.on("data", (chunk: Buffer | Uint8Array | string) => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        totalBytes += buffer.length;
-        if (options.maxBytes !== undefined && totalBytes > options.maxBytes) {
-          destination.destroy(
-            new Error("File exceeds the configured download limit"),
-          );
-          return;
-        }
-        chunks.push(buffer);
-      });
-      destination.once("end", () => resolve(Buffer.concat(chunks)));
-      destination.once("error", reject);
-    });
-
+    const downloadComplete = bufferStream(
+      destination,
+      options.maxBytes ?? MAX_FILE_SIZE,
+    );
     try {
-      await this.withClient(async (client) => {
-        await client.downloadTo(destination, remotePath);
-        destination.end();
-      });
-      return await downloadComplete;
-    } catch (error) {
-      destination.destroy(error as Error);
-      throw error;
+      // Attach both rejection handlers before starting I/O, so an oversized
+      // stream cannot become an unhandled rejection while FTP is still active.
+      const [body] = await Promise.all([
+        downloadComplete,
+        this.withClient(async (client) => {
+          await client.downloadTo(destination, remotePath);
+          destination.end();
+        }),
+      ]);
+      return body;
+    } catch (cause) {
+      destination.destroy(cause instanceof Error ? cause : undefined);
+      throw cause;
     }
   }
 
-  async delete(options: DeleteOptions): Promise<void> {
+  override async delete(options: DeleteOptions): Promise<void> {
     await this.withClient((client) =>
       client.remove(this.getRemotePath(options.key)).then(() => undefined),
     );

@@ -402,7 +402,17 @@ export function createUploadHelpers<TRouter extends FileRouter>(
 
   const getRouteConfig = <TEndpoint extends FileRouterEndpoint<TRouter>>(
     endpointArg: TEndpoint | ((router: TRouter) => TEndpoint),
-  ) => router[resolveEndpoint(endpointArg, router)].config;
+  ) => {
+    const endpoint = resolveEndpoint(endpointArg, router);
+    const route = router[endpoint];
+    if (!Object.hasOwn(router, endpoint) || !route)
+      throw new UploadClientError(
+        "Upload endpoint is not configured",
+        404,
+        "UNKNOWN_ENDPOINT",
+      );
+    return route.config;
+  };
 
   return { uploadFiles, useFileUpload, getRouteConfig };
 }

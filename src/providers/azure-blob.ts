@@ -1,10 +1,5 @@
-import {
-  BlobSASPermissions,
-  BlobServiceClient,
-  type BlockBlobClient,
-  generateBlobSASQueryParameters,
-  StorageSharedKeyCredential,
-} from "@azure/storage-blob";
+import type { BlobServiceClient, BlockBlobClient } from "@azure/storage-blob";
+import type { Readable } from "node:stream";
 import type {
   AzureUploadPart,
   DeleteOptions,
@@ -22,6 +17,16 @@ import type {
   PresignedUrlResponse,
   UploadOptions,
 } from "../types/core";
+import { MAX_FILE_SIZE } from "../types/core";
+import { bufferStream } from "../utils/bounded-stream";
+import { UploadError } from "../utils/errors";
+import { optionalDependency } from "../utils/optional-dependency";
+import {
+  assertByteSize,
+  assertContentType,
+  assertPartNumbers,
+  assertWriteMode,
+} from "../utils/storage-validation";
 import { BaseStorageProvider } from "./base";
 
 /**
@@ -61,6 +66,10 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
   constructor(config: AzureBlobConfig) {
     super();
+    const { BlobServiceClient, StorageSharedKeyCredential } =
+      optionalDependency<typeof import("@azure/storage-blob")>(
+        "@azure/storage-blob",
+      );
     if (!config.containerName.trim()) {
       throw new Error("Azure container name is required");
     }
@@ -126,7 +135,14 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     return containerClient.getBlockBlobClient(key);
   }
 
-  async upload(options: UploadOptions): Promise<FileInfo> {
+  override async upload(options: UploadOptions): Promise<FileInfo> {
+    assertWriteMode(options.writeMode);
+    assertContentType(options.contentType);
+    if (options.writeMode === "create-only")
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support create-only writes",
+      );
     const { file, fileName, contentType, preserveKey, customKey, metadata } =
       options;
 
@@ -158,7 +174,14 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     };
   }
 
-  async download(options: DownloadOptions): Promise<Buffer> {
+  override async download(options: DownloadOptions): Promise<Buffer> {
+    if (options.range)
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support range reads",
+      );
+    if (options.maxBytes !== undefined)
+      assertByteSize(options.maxBytes, "Download limit");
     const { key } = options;
     const fullKey = this.getFullKey(key);
 
@@ -171,11 +194,11 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     return this.streamToBuffer(
       downloadResponse.readableStreamBody,
-      options.maxBytes,
+      options.maxBytes ?? MAX_FILE_SIZE,
     );
   }
 
-  async delete(options: DeleteOptions): Promise<void> {
+  override async delete(options: DeleteOptions): Promise<void> {
     const { key } = options;
     const fullKey = this.getFullKey(key);
 
@@ -183,20 +206,30 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     await blobClient.delete();
   }
 
-  supportsPresignedUrls(): boolean {
+  override supportsPresignedUrls(): boolean {
     return !!this.config.accountKey;
   }
 
-  async generatePresignedUploadUrl(
+  override async generatePresignedUploadUrl(
     options: PresignedUploadUrlOptions,
   ): Promise<PresignedUrlResponse> {
+    assertWriteMode(options.writeMode);
+    assertContentType(options.contentType);
+    assertByteSize(options.fileSize);
+    if (options.writeMode === "create-only")
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "Azure presigning does not enforce create-only writes",
+      );
     if (!this.config.accountName || !this.config.accountKey) {
       throw new Error("Account name and key required for SAS generation");
     }
 
     const { fileName, contentType, expirationSeconds, metadata } = options;
 
-    const key = this.getFullKey(this.generateKey(fileName));
+    const key = this.getFullKey(
+      options.customKey ?? this.generateKey(fileName),
+    );
     const blobClient = this.getBlobClient(key);
 
     const startsOn = new Date();
@@ -205,6 +238,13 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
         this.normalizeExpirationSeconds(expirationSeconds) * 1000,
     );
 
+    const {
+      StorageSharedKeyCredential,
+      BlobSASPermissions,
+      generateBlobSASQueryParameters,
+    } = optionalDependency<typeof import("@azure/storage-blob")>(
+      "@azure/storage-blob",
+    );
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
       this.config.accountKey,
@@ -244,7 +284,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     };
   }
 
-  async generatePresignedDownloadUrl(
+  override async generatePresignedDownloadUrl(
     options: PresignedDownloadUrlOptions,
   ): Promise<string> {
     if (!this.config.accountName || !this.config.accountKey) {
@@ -262,6 +302,13 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
         this.normalizeExpirationSeconds(expirationSeconds) * 1000,
     );
 
+    const {
+      StorageSharedKeyCredential,
+      BlobSASPermissions,
+      generateBlobSASQueryParameters,
+    } = optionalDependency<typeof import("@azure/storage-blob")>(
+      "@azure/storage-blob",
+    );
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
       this.config.accountKey,
@@ -281,14 +328,16 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     return `${blobClient.url}?${sasToken}`;
   }
 
-  supportsMultipartUpload(): boolean {
+  override supportsMultipartUpload(): boolean {
     return true;
   }
 
-  async initiateMultipartUpload(
+  override async initiateMultipartUpload(
     options: MultipartInitOptions,
   ): Promise<MultipartInitResponse> {
     const { fileName, contentType, metadata } = options;
+    assertContentType(contentType);
+    assertByteSize(options.fileSize);
 
     const key = this.getFullKey(this.generateKey(fileName));
 
@@ -308,7 +357,13 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       multipartUpload: "true",
     };
 
-    await blobClient.setMetadata(this.sanitizeMetadata(uploadMetadata, 8000));
+    // setMetadata alone fails for a new blob. Create the pending object first
+    // and require an absent key so initialization cannot replace user content.
+    await blobClient.upload(Buffer.alloc(0), 0, {
+      conditions: { ifNoneMatch: "*" },
+      blobHTTPHeaders: { blobContentType: contentType },
+      metadata: this.sanitizeMetadata(uploadMetadata, 8000),
+    });
 
     return {
       uploadId,
@@ -316,7 +371,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     };
   }
 
-  async getMultipartPartUrls(
+  override async getMultipartPartUrls(
     options: MultipartPartUrlsOptions,
   ): Promise<MultipartPartUrl[]> {
     if (!this.config.accountName || !this.config.accountKey) {
@@ -324,15 +379,24 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     }
 
     const { key, partNumbers } = options;
+    assertPartNumbers(partNumbers);
     const fullKey = this.getFullKey(key);
 
     const blobClient = this.getBlobClient(fullKey);
 
+    const {
+      StorageSharedKeyCredential,
+      BlobSASPermissions,
+      generateBlobSASQueryParameters,
+    } = optionalDependency<typeof import("@azure/storage-blob")>(
+      "@azure/storage-blob",
+    );
     const credential = new StorageSharedKeyCredential(
       this.config.accountName,
       this.config.accountKey,
     );
 
+    await this.assertPendingUpload(blobClient, options.uploadId);
     return partNumbers.map((partNumber) => {
       // Azure uses block IDs (base64 encoded, same length)
       const blockId = Buffer.from(
@@ -363,7 +427,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     });
   }
 
-  async completeMultipartUpload(
+  override async completeMultipartUpload(
     options: MultipartCompleteOptions,
   ): Promise<MultipartCompleteResponse> {
     const { key, parts } = options;
@@ -381,6 +445,20 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       return part;
     });
 
+    assertPartNumbers(azureParts.map((part) => part.partNumber));
+    if (
+      azureParts.some(
+        (part) =>
+          typeof part.blockId !== "string" ||
+          !/^[A-Za-z0-9+/]+={0,2}$/.test(part.blockId),
+      )
+    )
+      throw new UploadError("INVALID_INPUT", "Invalid Azure block ID");
+    const pending = await this.assertPendingUpload(
+      blobClient,
+      options.uploadId,
+    );
+
     // Sort parts and extract block IDs
     const blockIds = azureParts
       .sort((a, b) => a.partNumber - b.partNumber)
@@ -388,7 +466,10 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
 
     // Commit the block list
     await blobClient.commitBlockList(blockIds, {
+      conditions: { ifMatch: pending.etag },
+      blobHTTPHeaders: { blobContentType: pending.contentType },
       metadata: {
+        ...pending.metadata,
         multipartUpload: "completed",
         uploadCompletedAt: new Date().toISOString(),
       },
@@ -401,18 +482,39 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     };
   }
 
-  async abortMultipartUpload(options: MultipartAbortOptions): Promise<void> {
+  override async abortMultipartUpload(
+    options: MultipartAbortOptions,
+  ): Promise<void> {
     const { key } = options;
     const fullKey = this.getFullKey(key);
 
     const blobClient = this.getBlobClient(fullKey);
 
-    try {
-      await blobClient.deleteIfExists();
-    } catch (error) {
-      // Ignore errors during cleanup
-      console.warn("Error aborting multipart upload:", error);
-    }
+    const pending = await this.assertPendingUpload(
+      blobClient,
+      options.uploadId,
+    );
+    await blobClient.deleteIfExists({ conditions: { ifMatch: pending.etag } });
+  }
+
+  private async assertPendingUpload(
+    blobClient: BlockBlobClient,
+    uploadId: string,
+  ) {
+    if (!uploadId?.trim())
+      throw new UploadError("INVALID_INPUT", "Upload ID is required");
+    const properties = await blobClient.getProperties();
+    if (
+      properties.metadata?.uploadId !== uploadId ||
+      properties.metadata?.multipartUpload !== "true"
+    )
+      throw new UploadError(
+        "UNAUTHORIZED",
+        "Multipart session does not match the pending object",
+        undefined,
+        403,
+      );
+    return properties;
   }
 
   /**
@@ -422,31 +524,6 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
     readableStream: NodeJS.ReadableStream,
     maxBytes?: number,
   ): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      let totalBytes = 0;
-      let settled = false;
-      readableStream.on("data", (data) => {
-        const buffer = data instanceof Buffer ? data : Buffer.from(data);
-        totalBytes += buffer.length;
-        if (maxBytes !== undefined && totalBytes > maxBytes) {
-          settled = true;
-          (
-            readableStream as NodeJS.ReadableStream & {
-              destroy?: (error?: Error) => void;
-            }
-          ).destroy?.(new Error("File exceeds the configured download limit"));
-          reject(new Error("File exceeds the configured download limit"));
-          return;
-        }
-        chunks.push(buffer);
-      });
-      readableStream.on("end", () => {
-        if (!settled) resolve(Buffer.concat(chunks));
-      });
-      readableStream.on("error", (error) => {
-        if (!settled) reject(error);
-      });
-    });
+    return bufferStream(readableStream as Readable, maxBytes ?? MAX_FILE_SIZE);
   }
 }

@@ -1,4 +1,8 @@
 import type { StorageProvider } from "./providers/base";
+import {
+  isMultipartUploadProvider,
+  isPresignedUrlProvider,
+} from "./providers/contracts";
 import type {
   DeleteOptions,
   DownloadOptions,
@@ -10,11 +14,15 @@ import type {
   MultipartInitResponse,
   MultipartPartUrl,
   MultipartPartUrlsOptions,
+  ObjectStatOptions,
   PresignedDownloadUrlOptions,
   PresignedUploadUrlOptions,
   PresignedUrlResponse,
+  StoredObjectMetadata,
   UploadOptions,
 } from "./types/core";
+import { concurrentMap } from "./utils/concurrent-map";
+import { UploadError } from "./utils/errors";
 
 /**
  * Storage manager configuration with multiple named storage providers
@@ -29,8 +37,10 @@ export type StorageManagerProviders<TContexts extends string = string> = Record<
 export interface StorageManagerConfig<TContexts extends string = string> {
   /** Map of context names to storage providers or lazy factories */
   providers: StorageManagerProviders<TContexts>;
+  /** Maximum concurrent provider operations in batch helpers (default: 8). */
+  batchConcurrency?: number;
   /** Default provider context to use when none specified */
-  defaultContext: TContexts;
+  defaultContext: NoInfer<TContexts>;
 }
 
 /**
@@ -117,12 +127,27 @@ export interface ContextualMultipartAbortOptions<
  */
 export class StorageManager<TContexts extends string = string> {
   private config: StorageManagerConfig<TContexts>;
+  private closed = false;
+  private closePromise?: Promise<void>;
 
   constructor(config: StorageManagerConfig<TContexts>) {
-    this.config = config;
+    this.config = { ...config, providers: { ...config.providers } };
+    const concurrency = config.batchConcurrency ?? 8;
+    if (
+      !Number.isSafeInteger(concurrency) ||
+      concurrency < 1 ||
+      concurrency > 1000
+    )
+      throw new UploadError(
+        "INVALID_INPUT",
+        "batchConcurrency must be an integer between 1 and 1000",
+      );
 
     // Validate that default context exists
-    if (!this.config.providers[this.config.defaultContext]) {
+    if (
+      !Object.hasOwn(this.config.providers, this.config.defaultContext) ||
+      !this.config.providers[this.config.defaultContext]
+    ) {
       throw new Error(
         `Default context '${this.config.defaultContext}' not found in providers`,
       );
@@ -133,10 +158,17 @@ export class StorageManager<TContexts extends string = string> {
    * Get provider for a specific context
    */
   private getProvider(context?: TContexts): StorageProvider {
-    const ctx = context || this.config.defaultContext;
+    if (this.closed)
+      throw new UploadError(
+        "PROVIDER_CLOSED",
+        "Storage manager is closed",
+        undefined,
+        503,
+      );
+    const ctx = context ?? this.config.defaultContext;
     const providerOrFactory = this.config.providers[ctx];
 
-    if (!providerOrFactory) {
+    if (!Object.hasOwn(this.config.providers, ctx) || !providerOrFactory) {
       throw new Error(`Storage provider not found for context: ${ctx}`);
     }
 
@@ -147,6 +179,50 @@ export class StorageManager<TContexts extends string = string> {
     }
 
     return providerOrFactory;
+  }
+
+  /** Query metadata without buffering the object body. */
+  async stat(
+    options: ObjectStatOptions & { context?: TContexts },
+  ): Promise<StoredObjectMetadata> {
+    const { context, ...request } = options;
+    const provider = this.getProvider(context);
+    if (!provider.stat)
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "Provider does not support object metadata",
+      );
+    return provider.stat(request);
+  }
+
+  /** Close initialized providers once; unused lazy factories are never invoked. */
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    const providers = [
+      ...new Set(
+        Object.values(this.config.providers).filter(
+          (provider): provider is StorageProvider =>
+            typeof provider !== "function",
+        ),
+      ),
+    ];
+    this.closePromise = Promise.allSettled(
+      providers.map(async (provider) => provider.close?.()),
+    ).then((results) => {
+      const errors = results
+        .filter(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
+        )
+        .map((result) => result.reason);
+      if (errors.length)
+        throw new AggregateError(
+          errors,
+          "Could not close all storage providers",
+        );
+    });
+    return this.closePromise;
   }
 
   /**
@@ -167,7 +243,7 @@ export class StorageManager<TContexts extends string = string> {
    * Check if a context exists
    */
   hasContext(context: TContexts): boolean {
-    return context in this.config.providers;
+    return Object.hasOwn(this.config.providers, context);
   }
 
   /**
@@ -204,7 +280,7 @@ export class StorageManager<TContexts extends string = string> {
    */
   supportsPresignedUrls(context?: TContexts): boolean {
     const provider = this.getProvider(context);
-    return provider.supportsPresignedUrls();
+    return isPresignedUrlProvider(provider);
   }
 
   /**
@@ -216,7 +292,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.generatePresignedUploadUrl) {
+    if (!isPresignedUrlProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -236,7 +312,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.generatePresignedDownloadUrl) {
+    if (!isPresignedUrlProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -252,7 +328,7 @@ export class StorageManager<TContexts extends string = string> {
    */
   supportsMultipartUpload(context?: TContexts): boolean {
     const provider = this.getProvider(context);
-    return provider.supportsMultipartUpload();
+    return isMultipartUploadProvider(provider);
   }
 
   /**
@@ -264,7 +340,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...initOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.initiateMultipartUpload) {
+    if (!isMultipartUploadProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -284,7 +360,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...urlOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.getMultipartPartUrls) {
+    if (!isMultipartUploadProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -304,7 +380,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...completeOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.completeMultipartUpload) {
+    if (!isMultipartUploadProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -324,7 +400,7 @@ export class StorageManager<TContexts extends string = string> {
     const { context, ...abortOptions } = options;
     const provider = this.getProvider(context);
 
-    if (!provider.abortMultipartUpload) {
+    if (!isMultipartUploadProvider(provider)) {
       throw new Error(
         `Provider for context '${
           context || this.config.defaultContext
@@ -339,19 +415,23 @@ export class StorageManager<TContexts extends string = string> {
    * Batch upload multiple files
    */
   async uploadBatch(
-    files: ContextualUploadOptions<TContexts>[],
+    files: readonly ContextualUploadOptions<TContexts>[],
   ): Promise<FileInfo[]> {
-    return Promise.all(files.map((options) => this.upload(options)));
+    return concurrentMap(files, this.config.batchConcurrency ?? 8, (options) =>
+      this.upload(options),
+    );
   }
 
   /**
    * Batch generate presigned upload URLs
    */
   async generatePresignedUploadUrlBatch(
-    requests: ContextualPresignedUploadUrlOptions<TContexts>[],
+    requests: readonly ContextualPresignedUploadUrlOptions<TContexts>[],
   ): Promise<PresignedUrlResponse[]> {
-    return Promise.all(
-      requests.map((options) => this.generatePresignedUploadUrl(options)),
+    return concurrentMap(
+      requests,
+      this.config.batchConcurrency ?? 8,
+      (options) => this.generatePresignedUploadUrl(options),
     );
   }
 }

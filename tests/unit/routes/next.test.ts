@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LocalStorageProvider } from "../providers/local";
-import { StorageManager } from "../storage-manager";
-import { createNextFileHandler } from "./next";
+import { LocalStorageProvider } from "../../../src/providers/local";
+import { createNextFileHandler } from "../../../src/routes/next";
+import { StorageManager } from "../../../src/storage-manager";
 
 const temporaryDirectories: string[] = [];
 

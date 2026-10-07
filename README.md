@@ -1,6 +1,6 @@
 # @circulo-ai/upload
 
-Production-oriented, type-safe file uploads for Node.js applications and React clients. The package provides one storage contract for S3-compatible services, Azure Blob Storage, Vercel Blob, FTP/FTPS, and local disk, plus Next.js and Hono route adapters and a typed file-router API.
+Production-oriented, type-safe file uploads for Node.js applications and React clients. The package provides one storage contract for S3-compatible services, Azure Blob Storage, Vercel Blob, FTP/FTPS, and local disk, plus Next.js, Hono and tRPC adapters and a typed file-router API.
 
 ## What it provides
 
@@ -15,6 +15,8 @@ Production-oriented, type-safe file uploads for Node.js applications and React c
 
 The package does not virus-scan, content-sniff, transcode, or authenticate requests. Those are application responsibilities and are called out below.
 
+The unreleased production contract, breaking completion-verification change, provider capabilities, and release qualification steps are documented in [PRODUCTION.md](./PRODUCTION.md).
+
 ## Installation
 
 ```bash
@@ -28,7 +30,8 @@ npm install hono @hono/zod-validator                           # Hono routes
 npm install react                                               # React helpers
 ```
 
-Local storage has no provider dependency. `@vercel/blob` is included as a runtime dependency for the Vercel provider.
+Local storage has no provider dependency. Install `@vercel/blob` for Vercel storage,
+`@trpc/server` 11.x and Zod 4 for tRPC, and Zod 4 for Next.js handlers.
 
 ## Runtime model
 
@@ -361,7 +364,7 @@ const fallbackType = getMimeTypeFromExtension("pdf");
 
 `validateFileType` checks the filename extension against the supplied MIME type. It does not inspect magic bytes, parse the file, or prove that a file is safe. For untrusted uploads, add content sniffing with an allowlisted parser, virus/malware scanning, image re-encoding, or an asynchronous quarantine workflow before making the object available.
 
-Errors thrown by the package are `UploadError` instances with a stable `code`, HTTP `status`, and optional `details`:
+Boundary validation errors use `UploadError` instances with a stable `code`, HTTP `status`, and optional `details`:
 
 `UNKNOWN_CONTEXT`, `MISSING_KEY`, `NO_FILES`, `TOO_MANY_FILES`, `MISSING_ENDPOINT`, `UNKNOWN_ENDPOINT`, `FILE_TOO_LARGE`, `UNSUPPORTED_FILE_TYPE`, `MIME_TYPE_MISMATCH`, `INVALID_INPUT`, `INVALID_FILE`, `UNAUTHORIZED`, `PROVIDER_UNSUPPORTED`, `PROVIDER_UNSUPPORTED_MULTIPART`, `NOT_FOUND`, `DOWNLOAD_FAILED`, and `INTERNAL_ERROR`.
 
@@ -392,6 +395,7 @@ Before production:
 - `maxFileCount`: positive integer; defaults to 100.
 - `validateFile`: optional server-side validation hook run for presign, batch-presign, multipart-init, and server upload phases.
 - `serveUrlBuilder`: creates application URLs for local/non-presigned files.
+- `verifyUploadCompletion`: required for client-triggered typed-router completion; return independently verified, authorized UploadResponse DTOs.
 - `hooks.beforeUpload`, `hooks.afterUpload`, `hooks.onError`: lifecycle hooks.
 
 ### Provider key behavior
@@ -401,3 +405,103 @@ Generated keys contain a timestamp, UUID, and sanitized basename unless `preserv
 ## License
 
 MIT
+
+## Infrastructure use (unreleased)
+
+Prefer isolated provider imports; unused SDKs are loaded only when used:
+
+```ts
+import { S3StorageProvider } from "@circulo-ai/upload/s3";
+import { detectCommonMimeType } from "@circulo-ai/upload/core";
+
+const storage = new S3StorageProvider({
+  bucket: config.bucket,
+  region: config.region,
+  endpoint: config.internalEndpoint,
+  publicEndpoint: config.publicEndpoint,
+  credentials: config.credentials,
+  forcePathStyle: true,
+  serverSideEncryption: "AES256",
+});
+const upload = await storage.generatePresignedUploadUrl({
+  customKey: pending.storageKey,
+  fileName: pending.fileName,
+  contentType: pending.contentType,
+  fileSize: pending.byteSize,
+  expirationSeconds: 300,
+  writeMode: "create-only",
+});
+// Send upload.url AND every upload.uploadHeaders entry to the browser.
+const metadata = await storage.stat({ key: upload.key });
+const prefix = await storage.download({
+  key: upload.key,
+  range: { start: 0, end: 63 },
+  maxBytes: 64,
+});
+const detected = detectCommonMimeType(prefix);
+// Compare metadata and detected with your authorized pending record.
+// Drain active work before releasing resources during graceful shutdown.
+storage.close();
+```
+
+The SDK-free `core` entrypoint also exports provider contracts, errors and the
+manager. Use `local-signed` for signed local-development transfers; mount the URLs
+in your server and keep authorization and upload-state checks in the application.
+See [PRODUCTION.md](./PRODUCTION.md) for a complete integration and release guide.
+
+## tRPC integration
+
+Install `@trpc/server` 11.x and Zod 4, then import the optional adapter from
+`@circulo-ai/upload/trpc`. Compose its schemas and resolvers into your existing
+router and protected procedures; your authentication, context, transformer and
+middleware remain owned by the application.
+
+```ts
+import { createTRPCFileHandlers } from "@circulo-ai/upload/trpc";
+
+const files = createTRPCFileHandlers<AppContext>({
+  storageManager,
+  router: fileRouter,
+  getRequest: (ctx) => ctx.req,
+  authorize: ({ ctx, action, input }) =>
+    mediaPolicy.authorize(ctx.actor, action, input),
+  verifyUploadCompletion,
+});
+
+export const uploadRouter = t.router({
+  presigned: protectedProcedure
+    .input(files.schemas.presigned)
+    .mutation(files.presigned),
+  presignedBatch: protectedProcedure
+    .input(files.schemas.presignedBatch)
+    .mutation(files.presignedBatch),
+  complete: protectedProcedure
+    .input(files.schemas.complete)
+    .mutation(files.complete),
+  download: protectedProcedure
+    .input(files.schemas.download)
+    .query(files.download),
+  delete: protectedProcedure.input(files.schemas.delete).mutation(files.delete),
+  multipartInitiate: protectedProcedure
+    .input(files.schemas.multipartInitiate)
+    .mutation(files.multipartInitiate),
+  multipartPartUrls: protectedProcedure
+    .input(files.schemas.multipartPartUrls)
+    .mutation(files.multipartPartUrls),
+  multipartComplete: protectedProcedure
+    .input(files.schemas.multipartComplete)
+    .mutation(files.multipartComplete),
+  multipartAbort: protectedProcedure
+    .input(files.schemas.multipartAbort)
+    .mutation(files.multipartAbort),
+});
+```
+
+Authorization is required for every operation, including object keys and multipart
+session IDs. Completion also requires independent storage verification. Upload
+bytes through the signed URL or the existing HTTP upload handler; download returns
+a URL rather than buffering binary data inside RPC JSON. `createTRPCFileSchemas`
+customizes batch limits, and `toTRPCUploadError` maps safe transport errors while
+preserving causes for server diagnostics. The adapter uses only public tRPC APIs.
+See [tRPC procedures](https://trpc.io/docs/server/procedures) for protected-procedure
+composition. Server calls and tests should use `router.createCaller(context)`.

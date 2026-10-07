@@ -15,10 +15,12 @@ export type {
   MultipartPartUrl,
   MultipartPartUrlsOptions,
   MultipartUploadPart,
+  ObjectStatOptions,
   PresignedDownloadUrlOptions,
   PresignedUploadUrlOptions,
   PresignedUrlResponse,
   S3UploadPart,
+  StoredObjectMetadata,
   SupportedAudioExtension,
   SupportedDocumentExtension,
   SupportedImageExtension,
@@ -55,7 +57,11 @@ export {
   LocalStorageProvider,
   type LocalStorageConfig,
 } from "./providers/local";
-export { S3StorageProvider, type S3Config } from "./providers/s3";
+export {
+  S3StorageProvider,
+  type S3Config,
+  type S3Credentials,
+} from "./providers/s3";
 export {
   VercelBlobStorageProvider,
   type VercelBlobConfig,
@@ -160,3 +166,12 @@ export {
   type FileRouterCompletionResponse,
   type FileRouterHandlerConfig,
 } from "./routes/router-handler";
+
+export {
+  SignedLocalStorageProvider,
+  type SignedLocalStorageConfig,
+} from "./providers/local-signed";
+
+export { detectCommonMimeType } from "./utils/content";
+
+export * from "./providers/contracts";

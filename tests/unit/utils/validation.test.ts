@@ -5,12 +5,12 @@ import {
   contentDisposition,
   normalizeStorageKey,
   sanitizeFilename,
-} from "./security";
+} from "../../../src/utils/security";
 import {
   getMimeTypeFromExtension,
   validateFileSize,
   validateFileType,
-} from "./validation";
+} from "../../../src/utils/validation";
 
 describe("upload validation", () => {
   it("accepts matching document MIME types", () => {

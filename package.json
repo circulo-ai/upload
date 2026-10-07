@@ -13,41 +13,156 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "PRODUCTION.md",
+    "ARCHITECTURE.md"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "exports": {
+    "./trpc": {
+      "import": {
+        "types": "./dist/routes/trpc.d.mts",
+        "default": "./dist/routes/trpc.mjs"
+      },
+      "require": {
+        "types": "./dist/routes/trpc.d.cts",
+        "default": "./dist/routes/trpc.cjs"
+      },
+      "default": "./dist/routes/trpc.mjs"
+    },
     ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs",
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
       "default": "./dist/index.mjs"
     },
     "./hono": {
-      "types": "./dist/routes/hono.d.mts",
-      "import": "./dist/routes/hono.mjs",
-      "require": "./dist/routes/hono.cjs",
+      "import": {
+        "types": "./dist/routes/hono.d.mts",
+        "default": "./dist/routes/hono.mjs"
+      },
+      "require": {
+        "types": "./dist/routes/hono.d.cts",
+        "default": "./dist/routes/hono.cjs"
+      },
       "default": "./dist/routes/hono.mjs"
     },
     "./next": {
-      "types": "./dist/routes/next.d.mts",
-      "import": "./dist/routes/next.mjs",
-      "require": "./dist/routes/next.cjs",
+      "import": {
+        "types": "./dist/routes/next.d.mts",
+        "default": "./dist/routes/next.mjs"
+      },
+      "require": {
+        "types": "./dist/routes/next.d.cts",
+        "default": "./dist/routes/next.cjs"
+      },
       "default": "./dist/routes/next.mjs"
     },
     "./validation": {
-      "types": "./dist/utils/validation.d.mts",
-      "import": "./dist/utils/validation.mjs",
-      "require": "./dist/utils/validation.cjs",
+      "import": {
+        "types": "./dist/utils/validation.d.mts",
+        "default": "./dist/utils/validation.mjs"
+      },
+      "require": {
+        "types": "./dist/utils/validation.d.cts",
+        "default": "./dist/utils/validation.cjs"
+      },
       "default": "./dist/utils/validation.mjs"
     },
     "./react": {
-      "types": "./dist/react.d.mts",
-      "import": "./dist/react.mjs",
-      "require": "./dist/react.cjs",
+      "import": {
+        "types": "./dist/react.d.mts",
+        "default": "./dist/react.mjs"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      },
       "default": "./dist/react.mjs"
+    },
+    "./s3": {
+      "import": {
+        "types": "./dist/providers/s3.d.mts",
+        "default": "./dist/providers/s3.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/s3.d.cts",
+        "default": "./dist/providers/s3.cjs"
+      },
+      "default": "./dist/providers/s3.mjs"
+    },
+    "./local": {
+      "import": {
+        "types": "./dist/providers/local.d.mts",
+        "default": "./dist/providers/local.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/local.d.cts",
+        "default": "./dist/providers/local.cjs"
+      },
+      "default": "./dist/providers/local.mjs"
+    },
+    "./local-signed": {
+      "import": {
+        "types": "./dist/providers/local-signed.d.mts",
+        "default": "./dist/providers/local-signed.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/local-signed.d.cts",
+        "default": "./dist/providers/local-signed.cjs"
+      },
+      "default": "./dist/providers/local-signed.mjs"
+    },
+    "./azure-blob": {
+      "import": {
+        "types": "./dist/providers/azure-blob.d.mts",
+        "default": "./dist/providers/azure-blob.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/azure-blob.d.cts",
+        "default": "./dist/providers/azure-blob.cjs"
+      },
+      "default": "./dist/providers/azure-blob.mjs"
+    },
+    "./ftp": {
+      "import": {
+        "types": "./dist/providers/ftp.d.mts",
+        "default": "./dist/providers/ftp.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/ftp.d.cts",
+        "default": "./dist/providers/ftp.cjs"
+      },
+      "default": "./dist/providers/ftp.mjs"
+    },
+    "./vercel-blob": {
+      "import": {
+        "types": "./dist/providers/vercel-blob.d.mts",
+        "default": "./dist/providers/vercel-blob.mjs"
+      },
+      "require": {
+        "types": "./dist/providers/vercel-blob.d.cts",
+        "default": "./dist/providers/vercel-blob.cjs"
+      },
+      "default": "./dist/providers/vercel-blob.mjs"
+    },
+    "./core": {
+      "import": {
+        "types": "./dist/core.d.mts",
+        "default": "./dist/core.mjs"
+      },
+      "require": {
+        "types": "./dist/core.d.cts",
+        "default": "./dist/core.cjs"
+      },
+      "default": "./dist/core.mjs"
     }
   },
   "publishConfig": {
@@ -56,13 +171,16 @@
   "scripts": {
     "dev": "bun ./node_modules/tsdown/dist/run.mjs --watch",
     "build": "bun ./node_modules/tsdown/dist/run.mjs",
-    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
-    "lint": "bun ../../node_modules/@biomejs/biome/bin/biome check src --formatter-enabled=false --assist-enabled=false --files-ignore-unknown=true",
-    "prepublishOnly": "bun run build",
-    "test": "bun ./node_modules/vitest/vitest.mjs run --passWithNoTests",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit && bun ./node_modules/typescript/bin/tsc --noEmit -p tests/tsconfig.json",
+    "lint": "bun ../../node_modules/@biomejs/biome/bin/biome check src tests scripts --formatter-enabled=false --assist-enabled=false --files-ignore-unknown=true",
+    "prepublishOnly": "bun run check:release",
+    "test": "bun ./node_modules/vitest/vitest.mjs run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "release": "bun run build && npm publish --access public"
+    "release": "gh workflow run release-publish.yml --ref master",
+    "check:release": "bun run typecheck && bun run lint && bun run test && bun run build && bun run test:package",
+    "test:package": "node scripts/test-package.mjs",
+    "test:integration": "node scripts/test-integration.mjs"
   },
   "keywords": [
     "upload",
@@ -79,8 +197,10 @@
   "author": "Circulo AI",
   "license": "MIT",
   "peerDependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
-    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@vercel/blob": "^2.0.0",
+    "@trpc/server": "^11.0.0",
+    "@aws-sdk/client-s3": "^3.645.0",
+    "@aws-sdk/s3-request-presigner": "^3.645.0",
     "@azure/storage-blob": "^12.0.0",
     "basic-ftp": "^6.2.0",
     "@hono/zod-validator": "^0.7.5",
@@ -89,6 +209,12 @@
     "zod": "^4.1.13"
   },
   "peerDependenciesMeta": {
+    "@vercel/blob": {
+      "optional": true
+    },
+    "@trpc/server": {
+      "optional": true
+    },
     "@aws-sdk/client-s3": {
       "optional": true
     },
@@ -103,18 +229,29 @@
     },
     "react": {
       "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "@hono/zod-validator": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@vercel/blob": "^2.0.0",
     "@aws-sdk/client-s3": "^3.645.0",
     "@aws-sdk/s3-request-presigner": "^3.645.0",
     "@azure/storage-blob": "^12.19.0",
-    "basic-ftp": "^6.2.0",
-    "@types/react": "^19.2.2",
-    "react": "^19.2.0",
     "@hono/zod-validator": "^0.7.5",
+    "@trpc/server": "^11",
     "@types/node": "^20.10.0",
+    "@types/react": "^19.2.2",
+    "basic-ftp": "^6.2.0",
     "hono": "^4.10.7",
+    "react": "^19.2.0",
     "tsdown": "^0.17.0",
     "tsup": "^8.0.1",
     "typescript": "^5.9.3",
@@ -124,7 +261,5 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {
-    "@vercel/blob": "^2.0.0"
-  }
+  "dependencies": {}
 }

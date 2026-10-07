@@ -52,15 +52,17 @@ function asMetadata(value: unknown): Record<string, string> {
 export class FileRouterHandler<TRouter extends FileRouter> {
   private readonly router: TRouter;
   private readonly handler: FileRouteHandler;
+  private readonly verifyUploadCompletion: FileHandlerConfig["verifyUploadCompletion"];
 
   constructor(config: FileRouterHandlerConfig<TRouter>) {
     this.router = config.router;
     this.handler = new FileRouteHandler(config);
+    this.verifyUploadCompletion = config.verifyUploadCompletion;
   }
 
   getRoute(endpoint: string): FileRouteDefinition {
     const route = this.router[endpoint];
-    if (!route) {
+    if (!Object.hasOwn(this.router, endpoint) || !route) {
       throw new UploadError(
         "UNKNOWN_ENDPOINT",
         `Upload endpoint '${endpoint}' is not configured`,
@@ -68,7 +70,8 @@ export class FileRouterHandler<TRouter extends FileRouter> {
         404,
       );
     }
-    return route;
+    // The route builder associates parsed input and middleware metadata with its handlers.
+    return route as FileRouteDefinition;
   }
 
   private async prepare<TInput>(
@@ -99,7 +102,8 @@ export class FileRouterHandler<TRouter extends FileRouter> {
     }
 
     for (const file of files) {
-      const contentType = file.type.split(";", 1)[0]?.trim().toLowerCase();
+      const contentType =
+        file.type.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       const rule = getFileRouteRule(route.config, contentType);
       if (rule.maxFileCount !== undefined && files.length > rule.maxFileCount) {
         throw new UploadError(
@@ -267,6 +271,14 @@ export class FileRouterHandler<TRouter extends FileRouter> {
     input: unknown = undefined,
   ): Promise<FileRouterCompletionResponse> {
     const route = this.getRoute(endpoint);
+    if (!this.verifyUploadCompletion) {
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "Client upload completion requires a server-side verifier",
+        undefined,
+        501,
+      );
+    }
     this.validateRouteFiles(route, files.map(asRouteFile));
     const routeMetadata = await this.prepare(
       route,
@@ -274,6 +286,13 @@ export class FileRouterHandler<TRouter extends FileRouter> {
       input,
       files.map(asRouteFile),
     );
-    return this.complete(route, routeMetadata, files);
+    const verified = await this.verifyUploadCompletion({
+      req,
+      endpoint,
+      files,
+      metadata: routeMetadata,
+    });
+    this.validateRouteFiles(route, verified.map(asRouteFile));
+    return this.complete(route, routeMetadata, verified);
   }
 }

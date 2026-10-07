@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { f, getFileRouteRule, parseFileSize } from "./router";
+import { f, getFileRouteRule, parseFileSize } from "../../src/router";
 
 describe("file router", () => {
   it("supports fluent constraints and lifecycle hooks", async () => {

@@ -19,8 +19,11 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "noUncheckedIndexedAccess": true,
+    "useUnknownInCatchVariables": true,
+    "noImplicitOverride": true
   },
-  "include": ["src/**/*", "test/**/*"],
-  "exclude": ["dist", "node_modules", "test/**/*.js"]
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules", "tests"]
 }

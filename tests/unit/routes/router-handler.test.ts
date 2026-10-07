@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { LocalStorageProvider } from "../providers/local";
-import { f } from "../router";
-import { StorageManager } from "../storage-manager";
-import { FileRouterHandler } from "./router-handler";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LocalStorageProvider } from "../../../src/providers/local";
+import { f } from "../../../src/router";
+import { FileRouterHandler } from "../../../src/routes/router-handler";
+import { StorageManager } from "../../../src/storage-manager";
 
 const temporaryDirectories: string[] = [];
 
@@ -113,5 +113,60 @@ describe("FileRouterHandler", () => {
         new Request("https://example.test/upload"),
       ),
     ).rejects.toMatchObject({ code: "INVALID_FILE" });
+  });
+});
+
+describe("client completion trust boundary", () => {
+  const file = {
+    key: "forged",
+    name: "file.txt",
+    size: 5,
+    type: "text/plain",
+    path: "/forged",
+    id: "untrusted",
+    url: "/forged",
+    uploadedAt: "2026-01-01T00:00:00Z",
+    expiresAt: "2026-01-02T00:00:00Z",
+    context: "local",
+  };
+  it("rejects client completion without a verifier before calling business hooks", async () => {
+    const complete = vi.fn();
+    const storageManager = new StorageManager({
+      providers: { local: new LocalStorageProvider({ basePath: "." }) },
+      defaultContext: "local",
+    });
+    const handler = new FileRouterHandler({
+      storageManager,
+      router: { files: f({ maxFileCount: 1 }).onUploadComplete(complete) },
+    });
+    await expect(
+      handler.handleComplete(
+        "files",
+        [file],
+        new Request("https://example.test/complete"),
+      ),
+    ).rejects.toMatchObject({ status: 501 });
+    expect(complete).not.toHaveBeenCalled();
+  });
+  it("passes only authoritative verified metadata to business hooks", async () => {
+    const complete = vi.fn();
+    const trusted = { ...file, key: "verified", path: "/verified" };
+    const storageManager = new StorageManager({
+      providers: { local: new LocalStorageProvider({ basePath: "." }) },
+      defaultContext: "local",
+    });
+    const handler = new FileRouterHandler({
+      storageManager,
+      router: { files: f({ maxFileCount: 1 }).onUploadComplete(complete) },
+      verifyUploadCompletion: async () => [trusted],
+    });
+    await handler.handleComplete(
+      "files",
+      [file],
+      new Request("https://example.test/complete"),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ file: trusted }),
+    );
   });
 });

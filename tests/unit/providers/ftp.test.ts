@@ -4,7 +4,7 @@ import {
   FtpStorageProvider,
   type FtpAccessOptions,
   type FtpClient,
-} from "./ftp";
+} from "../../../src/providers/ftp";
 
 class MemoryFtpClient implements FtpClient {
   readonly files = new Map<string, Buffer>();

@@ -1,4 +1,11 @@
-import { del, head, put } from "@vercel/blob";
+import { MAX_FILE_SIZE } from "../types/core";
+import { UploadError } from "../utils/errors";
+import {
+  assertByteSize,
+  assertContentType,
+  assertWriteMode,
+} from "../utils/storage-validation";
+
 import type {
   DeleteOptions,
   DownloadOptions,
@@ -105,7 +112,14 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    *
    * Docs: `put(pathname, body, options)`
    */
-  async upload(options: UploadOptions): Promise<FileInfo> {
+  override async upload(options: UploadOptions): Promise<FileInfo> {
+    assertWriteMode(options.writeMode);
+    assertContentType(options.contentType);
+    if (options.writeMode === "create-only")
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support create-only writes",
+      );
     const { file, fileName, contentType, preserveKey, customKey } = options;
 
     // Sanitize the filename to avoid weird characters
@@ -115,6 +129,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
     const baseKey = customKey || this.generateKey(safeName, preserveKey);
     const pathname = this.getFullPath(baseKey);
 
+    const { put } = await import("@vercel/blob");
     const blob = await put(pathname, file, {
       // Access is required; Vercel currently uses "public"
       access: this.config.access ?? "public",
@@ -148,10 +163,18 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    *
    * Docs show `head("filepath", { token })` to retrieve metadata.
    */
-  async download(options: DownloadOptions): Promise<Buffer> {
+  override async download(options: DownloadOptions): Promise<Buffer> {
+    if (options.range)
+      throw new UploadError(
+        "PROVIDER_UNSUPPORTED",
+        "This provider does not support range reads",
+      );
+    if (options.maxBytes !== undefined)
+      assertByteSize(options.maxBytes, "Download limit");
     const fullPath = this.getFullPath(options.key);
 
     // Step 1: resolve the blob metadata to get its URL
+    const { head } = await import("@vercel/blob");
     const blobMeta = await head(fullPath, {
       token: this.config.token,
     });
@@ -171,29 +194,38 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
       throw new Error("File exceeds the configured download limit");
     }
 
-    // Step 2: stream the blob into memory using global fetch
-    const fetchImpl: any = (globalThis as any).fetch;
-    if (typeof fetchImpl !== "function") {
-      throw new Error(
-        "globalThis.fetch is not available in this runtime; cannot download from Vercel Blob.",
+    // Stop reading before an untrusted blob can exhaust the process heap.
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok || !response.body)
+      throw new UploadError(
+        "DOWNLOAD_FAILED",
+        "Could not download blob",
+        undefined,
+        502,
       );
+    const limit = options.maxBytes ?? MAX_FILE_SIZE;
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > limit)
+          throw new UploadError(
+            "FILE_TOO_LARGE",
+            "File exceeds the configured download limit",
+            undefined,
+            413,
+          );
+        chunks.push(Buffer.from(chunk.value));
+      }
+      return Buffer.concat(chunks, size);
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
     }
-
-    const res: any = await fetchImpl(url);
-    if (!res.ok) {
-      throw new Error(
-        `Failed to download blob ${options.key}: ${res.status} ${res.statusText}`,
-      );
-    }
-
-    const arrayBuffer: ArrayBuffer = await res.arrayBuffer();
-    if (
-      options.maxBytes !== undefined &&
-      arrayBuffer.byteLength > options.maxBytes
-    ) {
-      throw new Error("File exceeds the configured download limit");
-    }
-    return Buffer.from(arrayBuffer);
   }
 
   /**
@@ -202,9 +234,10 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    * The SDK’s `del()` accepts either a pathname or a URL and requires a
    * read-write token (via env or `token` option).
    */
-  async delete(options: DeleteOptions): Promise<void> {
+  override async delete(options: DeleteOptions): Promise<void> {
     const fullPath = this.getFullPath(options.key);
 
+    const { del } = await import("@vercel/blob");
     await del(fullPath, {
       token: this.config.token,
     });
@@ -218,7 +251,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    * At this abstraction level, we stick to server-side uploads and don’t
    * expose presigned URLs.
    */
-  supportsPresignedUrls(): boolean {
+  override supportsPresignedUrls(): boolean {
     return false;
   }
 
@@ -227,7 +260,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
    * `multipart: true` is passed in options. We *don’t* provide a manual,
    * S3-style multipart API here.
    */
-  supportsMultipartUpload(): boolean {
+  override supportsMultipartUpload(): boolean {
     return false;
   }
 }

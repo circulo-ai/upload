@@ -62,6 +62,18 @@ export function normalizeStorageKey(key: string): string {
     );
   }
 
+  // Cross-platform keys must not alias device files, NTFS streams, or paths
+  // that Windows silently rewrites (trailing spaces/dots).
+  if (
+    segments.some(
+      (segment) =>
+        /[:<>"|?*]/.test(segment) ||
+        /[ .]$/.test(segment) ||
+        /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment),
+    )
+  ) {
+    throw new Error("Storage keys must not contain reserved filesystem names");
+  }
   return segments.join("/");
 }
 

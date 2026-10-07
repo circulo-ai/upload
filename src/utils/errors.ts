@@ -1,4 +1,7 @@
 export type UploadErrorCode =
+  | "DEPENDENCY_MISSING"
+  | "ALREADY_EXISTS"
+  | "PROVIDER_CLOSED"
   | "UNKNOWN_CONTEXT"
   | "MISSING_KEY"
   | "NO_FILES"
@@ -27,8 +30,9 @@ export class UploadError extends Error {
     message: string,
     details?: Record<string, unknown>,
     status: number = 400,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "UploadError";
     this.code = code;
     this.status = Math.min(599, Math.max(400, Math.trunc(status)));
