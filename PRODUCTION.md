@@ -74,6 +74,17 @@ returned key unchanged; prefixes are not applied twice.
 
 ## Capabilities and lifecycle
 
+Apply authentication, ownership/session authorization, request body limits and
+rate limits before mounting HTTP adapters. Next/Hono multipart parsing buffers
+request files before storage validation; route file limits do not replace a
+transport-level body limit. Prefer direct signed uploads for large files. Set
+application-wide admission limits and quotas in addition to per-batch concurrency.
+
+tRPC handlers require an authorization callback for every operation and compose
+into the application's protected procedures. Object keys and multipart sessions
+must be bound to the authenticated owner, not merely checked for syntactic validity.
+Keep the application's tRPC error formatter from exposing server causes or stacks.
+
 | Provider      | Exact-key presign | Create-only write                 | Metadata/range reads    | Real backend verified here |
 | ------------- | ----------------- | --------------------------------- | ----------------------- | -------------------------- |
 | S3 compatible | Yes               | Yes, signed PUT or trusted upload | Yes                     | MinIO                      |

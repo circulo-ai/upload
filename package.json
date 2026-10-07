@@ -197,16 +197,15 @@
   "author": "Circulo AI",
   "license": "MIT",
   "peerDependencies": {
-    "@vercel/blob": "^2.0.0",
-    "@trpc/server": "^11.0.0",
     "@aws-sdk/client-s3": "^3.1147.0",
     "@aws-sdk/s3-request-presigner": "^3.1147.0",
-    "@azure/storage-blob": "^12.0.0",
+    "@azure/storage-blob": "^12.34.0",
+    "@trpc/server": "^11.19.0",
+    "@vercel/blob": "^2.8.1",
     "basic-ftp": "^6.2.2",
-    "@hono/zod-validator": "^0.7.5",
-    "hono": "^4.10.7",
+    "hono": "^4.13.13",
     "react": ">=18.2.0",
-    "zod": "^4.1.13"
+    "zod": "^4.6.5"
   },
   "peerDependenciesMeta": {
     "@vercel/blob": {
@@ -233,9 +232,6 @@
     "hono": {
       "optional": true
     },
-    "@hono/zod-validator": {
-      "optional": true
-    },
     "zod": {
       "optional": true
     }
@@ -243,21 +239,20 @@
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1147.0",
     "@aws-sdk/s3-request-presigner": "^3.1147.0",
-    "@azure/storage-blob": "^12.19.0",
+    "@azure/storage-blob": "^12.34.0",
     "@biomejs/biome": "^2.3.8",
-    "@hono/zod-validator": "^0.7.5",
-    "@trpc/server": "^11",
+    "@trpc/server": "^11.19.0",
     "@types/node": "^20.10.0",
     "@types/react": "^19.2.2",
-    "@vercel/blob": "^2.0.0",
+    "@vercel/blob": "^2.8.1",
     "@vitest/coverage-v8": "^4.1.11",
     "basic-ftp": "^6.2.2",
-    "hono": "^4.10.7",
+    "hono": "^4.13.13",
     "react": "^19.2.0",
     "tsdown": "^0.17.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
-    "zod": "^4.1.13"
+    "zod": "^4.6.5"
   },
   "engines": {
     "node": ">=22.0.0"

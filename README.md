@@ -26,7 +26,7 @@ npm install @circulo-ai/upload
 npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner # S3/R2/MinIO
 npm install @azure/storage-blob                              # Azure Blob
 npm install basic-ftp                                          # FTP/FTPS
-npm install hono @hono/zod-validator                           # Hono routes
+npm install hono zod                                           # Hono routes
 npm install react                                               # React helpers
 ```
 
