@@ -111,6 +111,8 @@ importing the root or a provider subpath does not require unused optional SDKs.
 - Azure abort errors are propagated and multipart session mismatches are rejected.
 - Vercel Blob is now an optional peer, matching other provider SDKs. Install
   `@vercel/blob` explicitly when using that provider.
+- The supported runtime is Node 22 or newer, with Bun covered by consumer tests.
+  AWS and FTP peers require the patched SDK versions listed in package.json.
 
 These changes require a major upgrade from 1.x. Review persisted keys, completion
 handlers and buffer limits before upgrading.
@@ -143,8 +145,7 @@ objects/bucket; stop the test server and remove its disposable data directory
 after verification. This backend is a local test fixture, not a production storage
 recommendation. See the upstream [source-build instructions](https://github.com/minio/minio#install-from-source).
 
-CI runs the release and MinIO checks on Node 18, 22 and 24 plus Bun. Node 18 is a
-compatibility target; choose a supported LTS release for production. Releases use
+CI runs the release and MinIO checks on Node 22 and 24 plus Bun. Releases use
 Changesets on `master` and `.github/workflows/release-publish.yml`. That workflow
 requires the package and MinIO checks before publishing through npm trusted
 publishing with GitHub OIDC; no long-lived npm token is used. `bun run release`

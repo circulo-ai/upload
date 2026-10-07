@@ -1,14 +1,5 @@
 # Changelog
 
-## Unreleased (major)
-
-- Add exact-key/create-only S3 presigning, stat/range reads, encryption, public endpoints, bounded network/read behavior and shutdown.
-- Add atomic create-only local storage with MIME metadata and signed transfer URLs.
-- Add lazy optional SDK loading, isolated subpaths and correct ESM/CJS declaration conditions.
-- Require verification of client-triggered completion, reject filesystem aliases and protect Azure multipart sessions.
-- Add packed-consumer tests, MinIO contract tests and a dedicated runtime CI matrix.
-- See PRODUCTION.md for migration requirements and tested/provider qualification limits.
-
 ## 1.7.0
 
 ### Minor Changes

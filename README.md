@@ -15,7 +15,7 @@ Production-oriented, type-safe file uploads for Node.js applications and React c
 
 The package does not virus-scan, content-sniff, transcode, or authenticate requests. Those are application responsibilities and are called out below.
 
-The unreleased production contract, breaking completion-verification change, provider capabilities, and release qualification steps are documented in [PRODUCTION.md](./PRODUCTION.md).
+The production contract, breaking completion-verification change, provider capabilities, and release qualification steps are documented in [PRODUCTION.md](./PRODUCTION.md).
 
 ## Installation
 
@@ -44,7 +44,7 @@ Providers and `StorageManager` are server-side APIs. Browser code should use pre
 | Manual multipart API            |             ✓ |                  ✓ |                        — |     — |        — |
 | Server-side automatic multipart |             — |                  — | ✓ with `multipart: true` |     — |        — |
 
-Use Node.js 18 or newer. Edge compatibility depends on the provider and runtime APIs; local disk, FTP, and the AWS SDK are generally Node-oriented.
+Use Node.js 22 or newer. Edge compatibility depends on the provider and runtime APIs; local disk, FTP, and the AWS SDK are generally Node-oriented.
 
 ## Quick start
 
@@ -406,7 +406,7 @@ Generated keys contain a timestamp, UUID, and sanitized basename unless `preserv
 
 MIT
 
-## Infrastructure use (unreleased)
+## Infrastructure use
 
 Prefer isolated provider imports; unused SDKs are loaded only when used:
 
