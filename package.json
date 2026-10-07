@@ -250,6 +250,7 @@
     "@types/node": "^20.10.0",
     "@types/react": "^19.2.2",
     "@vercel/blob": "^2.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "basic-ftp": "^6.2.2",
     "hono": "^4.10.7",
     "react": "^19.2.0",
