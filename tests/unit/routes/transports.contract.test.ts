@@ -24,7 +24,7 @@ const claim: UploadResponse = {
   id: "claim",
   name: "file.txt",
   size: 2,
-            type: expect.stringMatching(/^text\/plain(?:;|$)/),
+  type: "text/plain",
   key: "untrusted/key",
   path: "untrusted/key",
   url: "https://example.test/object",
@@ -138,7 +138,10 @@ describe.each(["hono", "next"] as const)(
       expect(completed).toHaveBeenCalledWith(
         expect.objectContaining({
           metadata: { userId: "owner" },
-          file: expect.objectContaining({ size: 2, type: "text/plain" }),
+          file: expect.objectContaining({
+            size: 2,
+            type: expect.stringMatching(/^text\/plain(?:;|$)/),
+          }),
         }),
       );
     });
