@@ -124,21 +124,24 @@ external integration tests unless explicitly configured; `test:integration`
 instead fails when configuration is absent, preventing a silent release check.
 
 For the S3 contract suite, use a disposable local MinIO instance (synthetic
-credentials only):
+credentials only). CI builds the pinned upstream security-release revision below,
+because historical public Docker images are no longer reliably available:
 
 ```sh
-docker run -d --name circulo-upload-contract \
-  -p 127.0.0.1:19007:9000 \
-  -e MINIO_ROOT_USER=upload-test \
-  -e MINIO_ROOT_PASSWORD=upload-test-password \
-  minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+go install github.com/minio/minio@9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+MINIO_ROOT_USER=upload-test MINIO_ROOT_PASSWORD=upload-test-password \
+  "$(go env GOPATH)/bin/minio" server /tmp/circulo-upload-contract \
+  --address 127.0.0.1:19007 &
+minio_pid=$!
 UPLOAD_S3_TEST_ENDPOINT=http://127.0.0.1:19007 bun run test:integration
-docker rm -f circulo-upload-contract
+kill "$minio_pid"
 ```
 
 In PowerShell set `$env:UPLOAD_S3_TEST_ENDPOINT='http://127.0.0.1:19007'` before
 running the test command. The tests create a unique bucket and remove their
-objects/bucket; the container must also be removed after verification.
+objects/bucket; stop the test server and remove its disposable data directory
+after verification. This backend is a local test fixture, not a production storage
+recommendation. See the upstream [source-build instructions](https://github.com/minio/minio#install-from-source).
 
 CI runs the release and MinIO checks on Node 18, 22 and 24 plus Bun. Node 18 is a
 compatibility target; choose a supported LTS release for production. Releases use
