@@ -1,9 +1,17 @@
 import { TRPCError } from "@trpc/server";
+import { ZodError } from "zod";
 import { UploadError } from "../../utils/errors";
 
 /** Preserve causes for server diagnostics, never expose unknown provider messages. */
 export function toTRPCUploadError(error: unknown): TRPCError {
   if (error instanceof TRPCError) return error;
+  if (error instanceof ZodError) {
+    return new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Invalid upload request",
+      cause: error,
+    });
+  }
   if (error instanceof UploadError) {
     switch (error.code) {
       case "UNAUTHORIZED":

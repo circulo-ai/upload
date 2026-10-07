@@ -397,17 +397,15 @@ export class FileRouteHandler {
         };
       }
 
-      const results = await Promise.all(
-        files.map((file) =>
-          storageManager.generatePresignedUploadUrl({
-            fileName: file.fileName,
-            contentType: file.contentType,
-            fileSize: file.fileSize,
-            context,
-            expirationSeconds: 3600,
-            metadata,
-          }),
-        ),
+      const results = await storageManager.generatePresignedUploadUrlBatch(
+        files.map((file) => ({
+          fileName: file.fileName,
+          contentType: file.contentType,
+          fileSize: file.fileSize,
+          context,
+          expirationSeconds: 3600,
+          metadata,
+        })),
       );
 
       return {
