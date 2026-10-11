@@ -365,7 +365,7 @@ export function formatFileSize(bytes: number, precision: number = 1): string {
     Math.floor(Math.log(bytes) / Math.log(k)),
   );
 
-  const value = bytes / Math.pow(k, i);
+  const value = bytes / k ** i;
   const formattedValue = Number.parseFloat(value.toFixed(precision));
 
   return `${formattedValue} ${sizes[i]}`;

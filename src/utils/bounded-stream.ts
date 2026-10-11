@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import { UploadError } from "./errors";
 import { assertByteSize } from "./storage-validation";
 

@@ -1,4 +1,4 @@
-import { Readable, type Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
   FtpStorageProvider,

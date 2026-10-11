@@ -467,6 +467,11 @@ export function createNextFileHandler<Req extends Request = Request>(
               return json(result);
             }
           }
+
+          // multipartActionSchema already rejects anything else, so this is
+          // unreachable. It stays explicit so the block can never fall
+          // through into the "upload" case below.
+          return notFound();
         }
 
         case "upload": {
