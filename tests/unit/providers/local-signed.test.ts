@@ -123,7 +123,7 @@ describe("local create-only and signed transfers", () => {
     await expect(
       storage.acceptSignedUpload({
         ...signed,
-        token: signed.token + "x",
+        token: `${signed.token}x`,
         contentType: "text/plain",
         body: Buffer.from("hello"),
       }),

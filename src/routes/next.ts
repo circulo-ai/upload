@@ -33,7 +33,7 @@ export interface NextRouteHandlerContext {
 export type NextRouteMiddleware<Req extends Request = Request> = (
   req: Req,
   context: NextRouteHandlerContext,
-) => Promise<Response | void> | Response | void;
+) => Promise<Response | undefined> | Response | undefined;
 
 export interface NextRouteConfig<Req extends Request = Request> {
   enabled?: boolean;

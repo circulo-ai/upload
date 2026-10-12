@@ -134,8 +134,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
       // Access is required; Vercel currently uses "public"
       access: this.config.access ?? "public",
       // Default: random suffix unless the caller explicitly wants deterministic keys
-      addRandomSuffix:
-        this.config.addRandomSuffix ?? (preserveKey ? false : true),
+      addRandomSuffix: this.config.addRandomSuffix ?? !preserveKey,
       contentType,
       cacheControlMaxAge: this.config.cacheControlMaxAge,
       multipart: this.config.multipart,

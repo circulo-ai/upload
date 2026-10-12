@@ -222,7 +222,9 @@ function uploadWithProgress(
   return new Promise<Response>((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", url);
-    headers.forEach((value, key) => request.setRequestHeader(key, value));
+    headers.forEach((value, key) => {
+      request.setRequestHeader(key, value);
+    });
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable)
         onProgress(Math.round((event.loaded / event.total) * 100));
@@ -394,7 +396,7 @@ export function createUploadHelpers<TRouter extends FileRouter>(
           if (mounted.current) setIsUploading(false);
         }
       },
-      [endpointArg, options, uploadFiles],
+      [endpointArg, options],
     );
 
     return { startUpload, isUploading, progress, error, reset };

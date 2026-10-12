@@ -450,16 +450,16 @@ export function createHonoFileRoutes<E extends Env = Env>(
       try {
         const metadata = await getMetadata(c);
         const formData = await c.req.parseBody({ all: true });
-        const inputRaw = formData["input"];
+        const inputRaw = formData.input;
         let routeInput: unknown;
         if (typeof inputRaw === "string" && inputRaw.length > 0) {
           routeInput = JSON.parse(inputRaw);
         }
 
-        const contextRaw = formData["context"];
+        const contextRaw = formData.context;
         const context = typeof contextRaw === "string" ? contextRaw : undefined;
 
-        const filesInput = formData["file"];
+        const filesInput = formData.file;
         const filesArray = Array.isArray(filesInput)
           ? filesInput
           : filesInput
