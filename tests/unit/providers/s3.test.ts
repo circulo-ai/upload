@@ -18,7 +18,9 @@ function provider(
   return storage;
 }
 afterEach(() => {
-  providers.splice(0).forEach((storage) => storage.close());
+  providers.splice(0).forEach((storage) => {
+    storage.close();
+  });
   vi.restoreAllMocks();
 });
 
