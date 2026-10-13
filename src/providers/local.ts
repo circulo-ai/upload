@@ -10,8 +10,8 @@ import {
   writeFile,
 } from "fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { dirname, join, resolve, sep } from "path";
+import { constants, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "path";
 import type {
   DeleteOptions,
   DownloadOptions,
@@ -50,6 +50,7 @@ export interface LocalStorageConfig {
 export class LocalStorageProvider extends BaseStorageProvider {
   private config: LocalStorageConfig;
   private fullBasePath: string;
+  private canonicalBasePath: string;
 
   constructor(config: LocalStorageConfig) {
     super();
@@ -60,6 +61,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
 
     // Resolve to absolute path
     this.fullBasePath = resolve(config.basePath);
+    this.canonicalBasePath = this.canonicalizePath(this.fullBasePath);
   }
 
   /**
@@ -101,14 +103,51 @@ export class LocalStorageProvider extends BaseStorageProvider {
    * Validate that a path is within the allowed base directory
    */
   private validatePath(filePath: string): void {
-    const resolvedPath = resolve(filePath);
+    const resolvedPath = this.canonicalizePath(filePath);
+    const basePath = this.canonicalBasePath;
+    const basePrefix = basePath.endsWith(sep) ? basePath : `${basePath}${sep}`;
 
-    if (
-      !resolvedPath.startsWith(this.fullBasePath + sep) &&
-      resolvedPath !== this.fullBasePath
-    ) {
+    if (!resolvedPath.startsWith(basePrefix) && resolvedPath !== basePath) {
       throw new Error("Access denied: path outside allowed directory");
     }
+  }
+
+  private canonicalizePath(filePath: string): string {
+    let ancestor = resolve(filePath);
+    const missingSegments: string[] = [];
+
+    while (true) {
+      try {
+        const canonicalAncestor = realpathSync.native(ancestor);
+        const canonicalPath = resolve(
+          canonicalAncestor,
+          ...missingSegments.reverse(),
+        );
+        return this.normalizePathForComparison(canonicalPath);
+      } catch (cause) {
+        const error = cause as NodeJS.ErrnoException;
+        if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw cause;
+
+        const parent = dirname(ancestor);
+        if (parent === ancestor) throw cause;
+        missingSegments.push(basename(ancestor));
+        ancestor = parent;
+      }
+    }
+  }
+
+  private normalizePathForComparison(filePath: string): string {
+    if (process.platform !== "win32") return filePath;
+
+    // fs.realpath may return the Windows extended-length form. Normalize it
+    // before comparing paths, since resolve(basePath) uses the regular form.
+    const normalized = filePath
+      .replace(/^\\\\\?\\UNC\\/i, "\\\\")
+      .replace(/^\\\\\?\\/, "");
+
+    // Windows paths are case-insensitive, while realpath can return the
+    // filesystem's canonical casing instead of the configured casing.
+    return normalized.toLowerCase();
   }
 
   /**

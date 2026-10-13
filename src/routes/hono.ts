@@ -503,7 +503,20 @@ export function createHonoFileRoutes<E extends Env = Env>(
         if (error instanceof Error && error.message === "Unauthorized") {
           return c.json({ error: "Unauthorized" }, 401);
         }
-        return c.json({ error: "Upload failed", code: "INTERNAL_ERROR" }, 500);
+        console.error("[upload] File upload failed", error);
+        return c.json(
+          {
+            error: "Upload failed",
+            code: "INTERNAL_ERROR",
+            ...(process.env.NODE_ENV === "development"
+              ? {
+                  details:
+                    error instanceof Error ? error.message : String(error),
+                }
+              : {}),
+          },
+          500,
+        );
       }
     });
   }
