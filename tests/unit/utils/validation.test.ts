@@ -13,6 +13,37 @@ import {
 } from "../../../src/utils/validation";
 
 describe("upload validation", () => {
+  it.each([
+    "ts",
+    "tsx",
+    "js",
+    "py",
+    "toml",
+    "xml",
+    "log",
+    "jsonl",
+    "tsv",
+    "odt",
+    "ods",
+    "odp",
+  ])("accepts supported %s ingestion files", (extension) => {
+    expect(
+      validateFileType(
+        `source.${extension}`,
+        getMimeTypeFromExtension(extension),
+      ),
+    ).toBeNull();
+  });
+  it("accepts common browser MIME aliases for code", () => {
+    expect(validateFileType("source.ts", "video/mp2t")).toBeNull();
+    expect(validateFileType("source.py", "text/x-python")).toBeNull();
+  });
+  it("distinguishes WebM audio recordings from WebM video", () => {
+    expect(
+      validateFileType("recording.webm", "audio/webm;codecs=opus"),
+    ).toBeNull();
+    expect(validateFileType("clip.webm", "video/webm")).toBeNull();
+  });
   it("accepts matching document MIME types", () => {
     expect(validateFileType("report.pdf", "application/pdf")).toBeNull();
   });

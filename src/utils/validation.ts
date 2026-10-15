@@ -42,6 +42,10 @@ export const MIME_TYPE_MAPPING: Record<string, ContentType> = {
   "application/vnd.ms-powerpoint": "document",
   "text/markdown": "document",
   "application/rtf": "document",
+  "text/tab-separated-values": "document",
+  "application/vnd.oasis.opendocument.text": "document",
+  "application/vnd.oasis.opendocument.spreadsheet": "document",
+  "application/vnd.oasis.opendocument.presentation": "document",
 
   // Audio
   "audio/mpeg": "audio",
@@ -79,6 +83,100 @@ export const SUPPORTED_MIME_TYPES: Record<
   SupportedDocumentExtension,
   string[]
 > = {
+  tsv: ["text/tab-separated-values", "text/plain", "application/octet-stream"],
+  odt: [
+    "application/vnd.oasis.opendocument.text",
+    "application/octet-stream",
+    "application/zip",
+  ],
+  ods: [
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/octet-stream",
+    "application/zip",
+  ],
+  odp: [
+    "application/vnd.oasis.opendocument.presentation",
+    "application/octet-stream",
+    "application/zip",
+  ],
+  markdown: ["text/plain", "application/octet-stream"],
+  log: ["text/plain", "application/octet-stream"],
+  ts: [
+    "text/plain",
+    "application/octet-stream",
+    "video/mp2t",
+    "application/typescript",
+    "text/typescript",
+  ],
+  tsx: ["text/plain", "application/octet-stream", "text/typescript"],
+  js: [
+    "text/plain",
+    "application/octet-stream",
+    "text/javascript",
+    "application/javascript",
+    "application/x-javascript",
+  ],
+  jsx: [
+    "text/plain",
+    "application/octet-stream",
+    "text/jsx",
+    "text/javascript",
+  ],
+  mjs: [
+    "text/plain",
+    "application/octet-stream",
+    "text/javascript",
+    "application/javascript",
+  ],
+  cjs: [
+    "text/plain",
+    "application/octet-stream",
+    "text/javascript",
+    "application/javascript",
+  ],
+  py: [
+    "text/plain",
+    "application/octet-stream",
+    "text/x-python",
+    "application/x-python-code",
+  ],
+  java: ["text/plain", "application/octet-stream", "text/x-java-source"],
+  rs: ["text/plain", "application/octet-stream"],
+  go: ["text/plain", "application/octet-stream"],
+  c: ["text/plain", "application/octet-stream"],
+  cpp: ["text/plain", "application/octet-stream"],
+  h: ["text/plain", "application/octet-stream"],
+  css: ["text/plain", "application/octet-stream", "text/css"],
+  scss: ["text/plain", "application/octet-stream", "text/x-scss"],
+  sql: [
+    "text/plain",
+    "application/octet-stream",
+    "application/sql",
+    "text/x-sql",
+  ],
+  sh: [
+    "text/plain",
+    "application/octet-stream",
+    "application/x-sh",
+    "text/x-shellscript",
+  ],
+  ps1: ["text/plain", "application/octet-stream", "text/x-powershell"],
+  toml: ["text/plain", "application/octet-stream", "application/toml"],
+  xml: [
+    "text/plain",
+    "application/octet-stream",
+    "application/xml",
+    "text/xml",
+  ],
+  ini: ["text/plain", "application/octet-stream"],
+  env: ["text/plain", "application/octet-stream"],
+  jsonl: [
+    "text/plain",
+    "application/octet-stream",
+    "application/x-ndjson",
+    "application/jsonl",
+    "application/json",
+  ],
   pdf: ["application/pdf", "application/x-pdf"],
   csv: ["text/csv", "application/csv", "text/comma-separated-values"],
   doc: ["application/msword", "application/doc", "application/vnd.ms-word"],
@@ -161,7 +259,10 @@ export const SUPPORTED_VIDEO_MIME_TYPES: Record<
  */
 export function getContentType(mimeType: string): ContentType | null {
   const baseMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase();
-  return baseMimeType ? MIME_TYPE_MAPPING[baseMimeType] || null : null;
+  return baseMimeType
+    ? MIME_TYPE_MAPPING[baseMimeType] ||
+        (baseMimeType.startsWith("text/") ? "document" : null)
+    : null;
 }
 
 /**
@@ -192,6 +293,34 @@ export function getMimeTypeFromExtension(extension: string): string {
     webp: "image/webp",
     svg: "image/svg+xml",
     // Documents
+    tsv: "text/tab-separated-values",
+    odt: "application/vnd.oasis.opendocument.text",
+    ods: "application/vnd.oasis.opendocument.spreadsheet",
+    odp: "application/vnd.oasis.opendocument.presentation",
+    markdown: "text/plain",
+    log: "text/plain",
+    ts: "text/plain",
+    tsx: "text/plain",
+    js: "text/plain",
+    jsx: "text/plain",
+    mjs: "text/plain",
+    cjs: "text/plain",
+    py: "text/plain",
+    java: "text/plain",
+    rs: "text/plain",
+    go: "text/plain",
+    c: "text/plain",
+    cpp: "text/plain",
+    h: "text/plain",
+    css: "text/plain",
+    scss: "text/plain",
+    sql: "text/plain",
+    sh: "text/plain",
+    ps1: "text/plain",
+    toml: "text/plain",
+    ini: "text/plain",
+    env: "text/plain",
+    jsonl: "text/plain",
     pdf: "application/pdf",
     txt: "text/plain",
     csv: "text/csv",
@@ -206,6 +335,8 @@ export function getMimeTypeFromExtension(extension: string): string {
     xls: "application/vnd.ms-excel",
     ppt: "application/vnd.ms-powerpoint",
     md: "text/markdown",
+    yaml: "text/yaml",
+    yml: "text/yaml",
     rtf: "application/rtf",
     // Audio
     mp3: "audio/mpeg",
@@ -279,7 +410,13 @@ export function validateFileType(
   }
 
   // Check audio types
-  if (extension in SUPPORTED_AUDIO_MIME_TYPES) {
+  if (
+    extension in SUPPORTED_AUDIO_MIME_TYPES &&
+    !(
+      extension in SUPPORTED_VIDEO_MIME_TYPES &&
+      baseMimeType.startsWith("video/")
+    )
+  ) {
     const allowedMimeTypes =
       SUPPORTED_AUDIO_MIME_TYPES[extension as SupportedAudioExtension];
 
