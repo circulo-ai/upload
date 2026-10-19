@@ -97,7 +97,9 @@ export class S3StorageProvider extends BaseStorageProvider {
     if (!config.bucket.trim()) throw new Error("S3 bucket is required");
     if (!config.region.trim()) throw new Error("S3 region is required");
     if (config.pathPrefix)
-      this.normalizeKey(config.pathPrefix.replace(/^\/+|\/+$/g, ""));
+      this.normalizeKey(
+        config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
+      );
     for (const endpointValue of [config.endpoint, config.publicEndpoint].filter(
       (value): value is string => value !== undefined,
     )) {

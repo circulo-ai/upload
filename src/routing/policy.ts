@@ -10,11 +10,26 @@ export function parseFileSize(value: string | number): number {
     }
     return value;
   }
-  const match = /^\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)?\s*$/i.exec(value);
-  if (!match) throw new Error(`Invalid file size: ${value}`);
-
-  const amount = Number(match[1]);
-  const unit = (match[2] ?? "B").toUpperCase();
+  let cursor = 0;
+  while (/\s/.test(value[cursor] ?? "")) cursor += 1;
+  const amountStart = cursor;
+  while (isDigit(value[cursor])) cursor += 1;
+  if (cursor === amountStart) throw new Error(`Invalid file size: ${value}`);
+  if (value[cursor] === ".") {
+    cursor += 1;
+    const fractionStart = cursor;
+    while (isDigit(value[cursor])) cursor += 1;
+    if (cursor === fractionStart)
+      throw new Error(`Invalid file size: ${value}`);
+  }
+  const amountEnd = cursor;
+  while (/\s/.test(value[cursor] ?? "")) cursor += 1;
+  const unitStart = cursor;
+  while (isAsciiLetter(value[cursor])) cursor += 1;
+  const unit = (value.slice(unitStart, cursor) || "B").toUpperCase();
+  while (/\s/.test(value[cursor] ?? "")) cursor += 1;
+  if (cursor !== value.length) throw new Error(`Invalid file size: ${value}`);
+  const amount = Number(value.slice(amountStart, amountEnd));
   const multiplier =
     unit === "TB"
       ? 1024 ** 4
@@ -30,6 +45,17 @@ export function parseFileSize(value: string | number): number {
     throw new Error(`Invalid file size: ${value}`);
   }
   return result;
+}
+
+function isDigit(value: string | undefined): boolean {
+  return value !== undefined && value >= "0" && value <= "9";
+}
+
+function isAsciiLetter(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    ((value >= "a" && value <= "z") || (value >= "A" && value <= "Z"))
+  );
 }
 
 export function validateFileRouteConfig(config: FileRouteConfig): void {

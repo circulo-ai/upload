@@ -77,7 +77,9 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       throw new Error("Azure account name is required");
     }
     if (config.pathPrefix) {
-      this.normalizeKey(config.pathPrefix.replace(/^\/+|\/+$/g, ""));
+      this.normalizeKey(
+        config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
+      );
     }
     this.config = config;
 
@@ -110,7 +112,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       return normalizedKey;
     }
     const prefix = this.normalizeKey(
-      this.config.pathPrefix.replace(/^\/+|\/+$/g, ""),
+      this.config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
     );
     if (normalizedKey === prefix || normalizedKey.startsWith(`${prefix}/`)) {
       return normalizedKey;
