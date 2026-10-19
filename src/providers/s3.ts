@@ -23,6 +23,7 @@ import { MAX_FILE_SIZE } from "../types/core";
 import { bufferStream } from "../utils/bounded-stream";
 import { UploadError } from "../utils/errors";
 import { optionalDependency } from "../utils/optional-dependency";
+import { trimStoragePathPrefix } from "../utils/security";
 import {
   assertByteSize,
   assertContentType,
@@ -97,9 +98,7 @@ export class S3StorageProvider extends BaseStorageProvider {
     if (!config.bucket.trim()) throw new Error("S3 bucket is required");
     if (!config.region.trim()) throw new Error("S3 region is required");
     if (config.pathPrefix)
-      this.normalizeKey(
-        config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
-      );
+      this.normalizeKey(trimStoragePathPrefix(config.pathPrefix));
     for (const endpointValue of [config.endpoint, config.publicEndpoint].filter(
       (value): value is string => value !== undefined,
     )) {

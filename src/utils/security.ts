@@ -77,6 +77,14 @@ export function normalizeStorageKey(key: string): string {
   return segments.join("/");
 }
 
+export function trimStoragePathPrefix(prefix: string): string {
+  let start = 0;
+  let end = prefix.length;
+  while (start < end && prefix.charCodeAt(start) === 47) start += 1;
+  while (end > start && prefix.charCodeAt(end - 1) === 47) end -= 1;
+  return prefix.slice(start, end);
+}
+
 /**
  * Build a Content-Disposition value without allowing header injection.
  */

@@ -10,6 +10,7 @@ import { MAX_FILE_SIZE } from "../types/core";
 import { bufferStream } from "../utils/bounded-stream";
 import { UploadError } from "../utils/errors";
 import { optionalDependency } from "../utils/optional-dependency";
+import { trimStoragePathPrefix } from "../utils/security";
 import {
   assertByteSize,
   assertContentType,
@@ -144,7 +145,7 @@ export class FtpStorageProvider extends BaseStorageProvider {
   private getFullKey(key: string): string {
     const normalizedKey = this.normalizeKey(key);
     const prefix = this.config.pathPrefix
-      ? this.normalizeKey(this.config.pathPrefix.replace(/^\/+|\/+$/g, ""))
+      ? this.normalizeKey(trimStoragePathPrefix(this.config.pathPrefix))
       : "";
 
     if (

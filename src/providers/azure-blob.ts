@@ -21,6 +21,7 @@ import { MAX_FILE_SIZE } from "../types/core";
 import { bufferStream } from "../utils/bounded-stream";
 import { UploadError } from "../utils/errors";
 import { optionalDependency } from "../utils/optional-dependency";
+import { trimStoragePathPrefix } from "../utils/security";
 import {
   assertByteSize,
   assertContentType,
@@ -77,9 +78,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       throw new Error("Azure account name is required");
     }
     if (config.pathPrefix) {
-      this.normalizeKey(
-        config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
-      );
+      this.normalizeKey(trimStoragePathPrefix(config.pathPrefix));
     }
     this.config = config;
 
@@ -112,7 +111,7 @@ export class AzureBlobStorageProvider extends BaseStorageProvider {
       return normalizedKey;
     }
     const prefix = this.normalizeKey(
-      this.config.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, ""),
+      trimStoragePathPrefix(this.config.pathPrefix),
     );
     if (normalizedKey === prefix || normalizedKey.startsWith(`${prefix}/`)) {
       return normalizedKey;

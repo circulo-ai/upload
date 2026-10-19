@@ -1,5 +1,6 @@
 import { MAX_FILE_SIZE } from "../types/core";
 import { UploadError } from "../utils/errors";
+import { trimStoragePathPrefix } from "../utils/security";
 import {
   assertByteSize,
   assertContentType,
@@ -99,7 +100,7 @@ export class VercelBlobStorageProvider extends BaseStorageProvider {
     }
 
     const prefix = this.normalizeKey(
-      this.config.pathPrefix.replace(/^\/+|\/+$/g, ""),
+      trimStoragePathPrefix(this.config.pathPrefix),
     );
     if (cleanedKey === prefix || cleanedKey.startsWith(`${prefix}/`)) {
       return cleanedKey;
