@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.2
+
+### Patch Changes
+
+- 1570518: Allow S3 request handler options to configure Node HTTP agents and override transport timeouts.
+
 ## 2.0.1
 
 ### Patch Changes
