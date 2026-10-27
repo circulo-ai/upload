@@ -1,9 +1,12 @@
 import { S3Client } from "@aws-sdk/client-s3";
+import { Agent as HttpAgent } from "node:http";
+import { Agent as HttpsAgent } from "node:https";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { S3StorageProvider } from "../../../src/providers/s3";
 
 const providers: S3StorageProvider[] = [];
+const agents: Array<{ destroy(): void }> = [];
 function provider(
   extra: Partial<ConstructorParameters<typeof S3StorageProvider>[0]> = {},
 ) {
@@ -21,10 +24,53 @@ afterEach(() => {
   providers.splice(0).forEach((storage) => {
     storage.close();
   });
+  agents.splice(0).forEach((agent) => {
+    agent.destroy();
+  });
   vi.restoreAllMocks();
 });
 
 describe("S3 storage guarantees", () => {
+  it("merges custom Node request handler options over timeout defaults", async () => {
+    const httpAgent = new HttpAgent();
+    const httpsAgent = new HttpsAgent();
+    agents.push(httpAgent, httpsAgent);
+
+    const storage = provider({
+      connectionTimeoutMs: 1_000,
+      requestTimeoutMs: 2_000,
+      requestHandlerOptions: {
+        httpAgent,
+        httpsAgent,
+        connectionTimeout: 5_000,
+        socketTimeout: 4_000,
+        throwOnRequestTimeout: false,
+      },
+    });
+    const client = (storage as unknown as { client: S3Client }).client;
+    const requestHandler = await client.config.requestHandler;
+    const handler = requestHandler as unknown as {
+      configProvider: Promise<unknown>;
+    };
+    const options = (await handler.configProvider) as {
+      httpAgentProvider(): Promise<HttpAgent>;
+      httpsAgent: HttpsAgent;
+      connectionTimeout: number;
+      requestTimeout: number;
+      socketTimeout: number;
+      throwOnRequestTimeout: boolean;
+    };
+
+    expect(await options.httpAgentProvider()).toBe(httpAgent);
+    expect(options).toMatchObject({
+      httpsAgent,
+      connectionTimeout: 5_000,
+      requestTimeout: 2_000,
+      socketTimeout: 4_000,
+      throwOnRequestTimeout: false,
+    });
+  });
+
   it("signs the exact key, MIME and create-only precondition using the public endpoint", async () => {
     const storage = provider({
       publicEndpoint: "https://public.example.test",

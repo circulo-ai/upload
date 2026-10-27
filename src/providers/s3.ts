@@ -1,4 +1,6 @@
 import type { S3Client, S3ClientConfig } from "@aws-sdk/client-s3";
+import type { Agent as HttpAgent } from "node:http";
+import type { Agent as HttpsAgent } from "node:https";
 import type { Readable } from "node:stream";
 import type {
   DeleteOptions,
@@ -41,6 +43,17 @@ export interface S3Credentials {
   readonly sessionToken?: string;
 }
 
+export interface S3RequestHandlerOptions {
+  /** Optional Node HTTP agent used for DNS pinning and transport policy. */
+  httpAgent?: HttpAgent;
+  /** Optional Node HTTPS agent used for DNS pinning and transport policy. */
+  httpsAgent?: HttpsAgent;
+  connectionTimeout?: number;
+  requestTimeout?: number;
+  socketTimeout?: number;
+  throwOnRequestTimeout?: boolean;
+}
+
 export interface S3Config {
   /** S3 bucket name */
   bucket: string;
@@ -57,6 +70,8 @@ export interface S3Config {
   maxAttempts?: number;
   connectionTimeoutMs?: number;
   requestTimeoutMs?: number;
+  /** Advanced Node.js request handler options; merged over the timeout defaults. */
+  requestHandlerOptions?: S3RequestHandlerOptions;
   /** Default maximum size for buffered reads (100 MiB). */
   maxDownloadBytes?: number;
   /** Force path-style URLs (required for MinIO and some S3-compatible services) */
@@ -143,6 +158,7 @@ export class S3StorageProvider extends BaseStorageProvider {
         requestTimeout: config.requestTimeoutMs ?? 30_000,
         socketTimeout: config.requestTimeoutMs ?? 30_000,
         throwOnRequestTimeout: true,
+        ...config.requestHandlerOptions,
       },
     };
 

@@ -61,6 +61,7 @@ export {
   S3StorageProvider,
   type S3Config,
   type S3Credentials,
+  type S3RequestHandlerOptions,
 } from "./providers/s3";
 export {
   VercelBlobStorageProvider,
